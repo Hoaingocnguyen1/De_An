@@ -4,7 +4,7 @@ Centralized configuration management with validation
 """
 import os
 from typing import Optional, Literal
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +16,8 @@ class DatabaseConfig(BaseModel):
     database_name: str = Field(default="multimodal_rag_db")
     vector_index_name: str = Field(default="vector_index")
     
-    @validator('uri')
+    @field_validator('uri')
+    @classmethod
     def validate_uri(cls, v):
         if not v or not v.startswith('mongodb'):
             raise ValueError("Invalid MongoDB URI")
@@ -30,7 +31,8 @@ class VoyageConfig(BaseModel):
     multimodal_model: str = Field(default="voyage-multimodal-3")
     rerank_model: str = Field(default="rerank-2.5")
     
-    @validator('api_key')
+    @field_validator('api_key')
+    @classmethod
     def validate_api_key(cls, v):
         if not v or not v.startswith('pa-'):
             raise ValueError("Invalid Voyage API key")
@@ -44,7 +46,8 @@ class GeminiConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=8192)
     
-    @validator('api_key')
+    @field_validator('api_key')
+    @classmethod
     def validate_api_key(cls, v):
         if not v or not v.startswith('AIzaSy'):
             raise ValueError("Invalid Gemini API key")
@@ -56,7 +59,8 @@ class QwenConfig(BaseModel):
     api_key: str = Field(..., description="DashScope API key")
     model_name: str = Field(default="qwen-vl-max")
     
-    @validator('api_key')
+    @field_validator('api_key')
+    @classmethod
     def validate_api_key(cls, v):
         if not v or not v.startswith('sk-'):
             raise ValueError("Invalid DashScope API key")

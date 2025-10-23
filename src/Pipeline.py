@@ -11,12 +11,12 @@ import logging
 from bson import ObjectId
 from PIL import Image
 
-from .storage.mongodb_handler import MongoDBHandler
+from .storage.MongoDBHandler import MongoDBHandler
 from .storage.schema import KnowledgeUnit
 from .extraction.pdf import PDFExtractor
 from .enrichment.enricher import ContentEnricher
 from .enrichment.clients.base_client import BaseLLMClient
-from .embedding.Embedder import ContentEmbedder
+from .embedder import ContentEmbedder
 
 logger = logging.getLogger(__name__)
 

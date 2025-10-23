@@ -13,10 +13,10 @@ from typing import List, Dict
 from src.config import get_config
 
 # Core components
-from src.storage.mongodb_handler import MongoDBHandler
+from src.storage.MongoDBHandler import MongoDBHandler
 from src.Pipeline import OptimizedPipeline
-from src.query.query_engine import EnhancedQueryEngine, VoyageReranker
-from src.embedding.Embedder import TextEmbedder, MultimodalEmbedder, ContentEmbedder
+from src.query_engine import EnhancedQueryEngine, VoyageReranker
+from src.embedder import TextEmbedder, MultimodalEmbedder, ContentEmbedder
 from src.enrichment.clients.gemini_client import GeminiClient
 from src.enrichment.clients.qwen_client import QwenClient
 

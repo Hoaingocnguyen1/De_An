@@ -6,9 +6,9 @@ import logging
 from typing import List, Dict, Any, Optional
 import voyageai
 
-from ..storage.mongodb_handler import MongoDBHandler
-from ..embedding.Embedder import TextEmbedder, MultimodalEmbedder
-from ..enrichment.clients.base_client import BaseLLMClient
+from .storage.MongoDBHandler import MongoDBHandler
+from .embedder import TextEmbedder, MultimodalEmbedder
+from .enrichment.clients.base_client import BaseLLMClient
 
 logger = logging.getLogger(__name__)
 
