@@ -1,0 +1,229 @@
+(multimodal) vhkmay@vhkmay-B760M-DS3H-DDR4:~/Downloads/de_an/De_An$ python main.py
+
+======================================================================
+CONFIGURATION SUMMARY
+======================================================================
+
+ Database:
+  - URI: mongodb+srv://tsunesauicgr_db_...
+  - Database: multimodal_rag_db
+  - Vector Index: vector_index
+
+ Voyage AI:
+  - Text Model: voyage-3
+  - Multimodal Model: voyage-multimodal-3
+  - Rerank Model: rerank-2.5
+
+ Gemini:
+  - Model: gemini-2.5-pro
+  - Temperature: 0.7
+
+  Processing:
+  - Workers: 4
+  - Batch Size: 16
+  - LayoutParser: True
+  - Whisper Model: base
+
+ Query:
+  - Cache Enabled: True
+  - Initial K: 20
+  - Final K: 5
+
+ Paths:
+  - Documents: documents
+  - Temp: temp
+======================================================================
+
+2025-10-25 12:45:37,901 - INFO - Initializing system components...
+2025-10-25 12:45:38,989 - INFO - ✓ MongoDB indexes created
+2025-10-25 12:45:38,989 - INFO - ⚠️  Remember to create Atlas Vector Search indexes manually:
+2025-10-25 12:45:38,989 - INFO -     - 'vector_index' on 'embeddings.vector' field
+2025-10-25 12:45:39,018 - INFO - ✓ MongoDB connection successful
+2025-10-25 12:45:39,018 - INFO - GeminiClient initialized with model: gemini-2.5-pro
+2025-10-25 12:45:39,018 - INFO - TextEmbedder initialized with Voyage AI model: voyage-3
+2025-10-25 12:45:39,018 - INFO - MultimodalEmbedder initialized with model: voyage-multimodal-3
+2025-10-25 12:45:39,018 - INFO - ContentEmbedder initialized with text and multimodal embedders
+2025-10-25 12:45:39,018 - INFO - VoyageReranker initialized with model: rerank-2.5
+2025-10-25 12:45:39,019 - INFO - 🔧 LayoutParser enabled - Initializing model...
+2025-10-25 12:45:39,019 - WARNING -   LayoutParser model initialization failed: module layoutparser has no attribute Detectron2LayoutModel
+2025-10-25 12:45:39,019 - INFO - Loading Whisper model 'base' onto device 'cpu'...
+2025-10-25 12:45:39,485 - INFO - Model 'base' loaded successfully.
+2025-10-25 12:45:39,485 - INFO - ✓ Optimized pipeline initialized
+2025-10-25 12:45:39,485 - INFO -   - LLM Client: ABCMeta
+2025-10-25 12:45:39,485 - INFO -   - Text Embedder: voyage-3
+2025-10-25 12:45:39,485 - INFO -   - Multimodal Embedder: voyage-multimodal-3
+2025-10-25 12:45:39,485 - INFO -   - Batch size: 16
+2025-10-25 12:45:39,485 - INFO -   - Max workers: 4
+2025-10-25 12:45:39,485 - INFO - ✓ Enhanced Query Engine ready with reranking
+2025-10-25 12:45:39,485 - INFO - ✓ Multimodal RAG System initialized
+2025-10-25 12:45:39,485 - INFO -   - Supported sources: PDF, Images, Videos, YouTube, Websites
+2025-10-25 12:45:39,485 - INFO - 
+================================================================================
+2025-10-25 12:45:39,486 - INFO - STEP 1: INGESTING DOCUMENTS
+2025-10-25 12:45:39,486 - INFO - ================================================================================
+2025-10-25 12:45:39,486 - INFO - Starting batch ingestion of 3 sources...
+2025-10-25 12:45:39,486 - INFO - Ingesting PDF: documents/1706.03762v7.pdf
+2025-10-25 12:45:39,515 - INFO - Created source document: 68fc6403c2ea9007fad0575c
+2025-10-25 12:45:39,515 - INFO - ⚡ Processing pdf: documents/1706.03762v7.pdf (Source ID: 68fc6403c2ea9007fad0575c)
+2025-10-25 12:45:39,515 - INFO -   [1/4] Extracting content in parallel...
+2025-10-25 12:45:39,515 - INFO - Starting parallel extraction for: documents/1706.03762v7.pdf
+2025-10-25T12:45:39 - INFO - Processing page-1
+2025-10-25 12:45:39,764 - INFO - Processing page-1
+2025-10-25T12:45:39 - INFO - Processing page-3
+2025-10-25 12:45:39,825 - INFO - Processing page-3
+2025-10-25T12:45:39 - INFO - Processing page-5
+2025-10-25 12:45:39,844 - INFO - Processing page-5
+2025-10-25T12:45:39 - INFO - Processing page-12
+2025-10-25 12:45:39,852 - INFO - Processing page-12
+2025-10-25T12:45:39 - INFO - Processing page-4
+2025-10-25 12:45:39,859 - INFO - Processing page-4
+2025-10-25T12:45:39 - INFO - Processing page-11
+2025-10-25 12:45:39,860 - INFO - Processing page-11
+2025-10-25T12:45:39 - INFO - Processing page-7
+2025-10-25 12:45:39,894 - INFO - Processing page-7
+2025-10-25T12:45:39 - INFO - Processing page-6
+2025-10-25 12:45:39,943 - INFO - Processing page-6
+2025-10-25T12:45:39 - INFO - Processing page-2
+2025-10-25 12:45:39,948 - INFO - Processing page-2
+2025-10-25T12:45:39 - INFO - Processing page-10
+2025-10-25 12:45:39,976 - INFO - Processing page-10
+2025-10-25T12:45:39 - INFO - Processing page-8
+2025-10-25 12:45:39,989 - INFO - Processing page-8
+2025-10-25 12:45:40,167 - WARNING - PyMuPDF table extraction failed on page 15: list index out of range
+2025-10-25T12:45:40 - INFO - Processing page-1
+2025-10-25 12:45:40,413 - INFO - Processing page-1
+2025-10-25 12:45:40,469 - WARNING - /home/vhkmay/anaconda3/envs/multimodal/lib/python3.11/site-packages/camelot/parsers/stream.py:365: UserWarning: No tables found in table area 2
+  warnings.warn(f"No tables found in table area {table_idx + 1}")
+
+2025-10-25T12:45:40 - INFO - Processing page-3
+2025-10-25 12:45:40,494 - INFO - Processing page-3
+2025-10-25T12:45:40 - INFO - Processing page-11
+2025-10-25 12:45:40,538 - INFO - Processing page-11
+2025-10-25T12:45:40 - INFO - Processing page-7
+2025-10-25 12:45:40,564 - INFO - Processing page-7
+2025-10-25T12:45:40 - INFO - Processing page-12
+2025-10-25 12:45:40,632 - INFO - Processing page-12
+2025-10-25T12:45:40 - INFO - Processing page-5
+2025-10-25 12:45:40,673 - INFO - Processing page-5
+2025-10-25T12:45:40 - INFO - Processing page-8
+2025-10-25 12:45:40,701 - INFO - Processing page-8
+2025-10-25T12:45:40 - INFO - Processing page-4
+2025-10-25 12:45:40,704 - INFO - Processing page-4
+2025-10-25 12:45:40,727 - WARNING - /home/vhkmay/Downloads/de_an/De_An/src/extraction/utils.py:203: UserWarning: DataFrame columns are not unique, some columns will be omitted.
+  "data": data_df.to_dict(orient='records'),
+
+2025-10-25T12:45:40 - INFO - Processing page-6
+2025-10-25 12:45:40,819 - INFO - Processing page-6
+2025-10-25T12:45:40 - INFO - Processing page-2
+2025-10-25 12:45:40,824 - INFO - Processing page-2
+2025-10-25T12:45:41 - INFO - Processing page-13
+2025-10-25 12:45:41,388 - INFO - Processing page-13
+2025-10-25T12:45:41 - INFO - Processing page-15
+2025-10-25 12:45:41,514 - INFO - Processing page-15
+2025-10-25T12:45:41 - INFO - Processing page-14
+2025-10-25 12:45:41,690 - INFO - Processing page-14
+2025-10-25T12:45:42 - INFO - Processing page-13
+2025-10-25 12:45:42,448 - INFO - Processing page-13
+2025-10-25 12:45:42,475 - WARNING - /home/vhkmay/Downloads/de_an/De_An/src/extraction/utils.py:203: UserWarning: DataFrame columns are not unique, some columns will be omitted.
+  "data": data_df.to_dict(orient='records'),
+
+2025-10-25T12:45:43 - INFO - Processing page-15
+2025-10-25 12:45:43,171 - INFO - Processing page-15
+2025-10-25 12:45:43,228 - WARNING - /home/vhkmay/Downloads/de_an/De_An/src/extraction/utils.py:203: UserWarning: DataFrame columns are not unique, some columns will be omitted.
+  "data": data_df.to_dict(orient='records'),
+
+2025-10-25T12:45:43 - INFO - Processing page-14
+2025-10-25 12:45:43,350 - INFO - Processing page-14
+2025-10-25 12:45:43,406 - WARNING - /home/vhkmay/Downloads/de_an/De_An/src/extraction/utils.py:203: UserWarning: DataFrame columns are not unique, some columns will be omitted.
+  "data": data_df.to_dict(orient='records'),
+
+2025-10-25 12:45:43,409 - INFO - Completed parallel extraction for: documents/1706.03762v7.pdf
+2025-10-25 12:45:43,410 - INFO -   → Extracted 164 elements
+2025-10-25 12:45:43,410 - INFO -   ✓ Extracted 164 raw objects
+2025-10-25 12:45:43,410 - INFO -   [2/4] Enriching content in batches...
+2025-10-25 12:45:43,417 - ERROR - self.client = <class 'src.enrichment.clients.gemini_client.GeminiClient'>, type = <class 'abc.ABCMeta'>
+2025-10-25 12:45:43,417 - ERROR - self.client = <class 'src.enrichment.clients.gemini_client.GeminiClient'>, type = <class 'abc.ABCMeta'>
+2025-10-25 12:45:43,418 - ERROR - Processing failed for documents/1706.03762v7.pdf: BaseLLMClient.create_structured_completion() missing 1 required positional argument: 'self'
+Traceback (most recent call last):
+  File "/home/vhkmay/Downloads/de_an/De_An/src/Pipeline.py", line 75, in process_document_async
+    kus = await self._process_pdf_optimized(file_path, source_id, source_uri)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/Pipeline.py", line 142, in _process_pdf_optimized
+    enriched_batch = await self.enricher.enrich_batch(batch)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/enrichment/enricher.py", line 52, in enrich_batch
+    return await asyncio.gather(*tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/enrichment/enricher.py", line 40, in _enrich_item
+    enrichment_result = await self.client.create_structured_completion(prompt=prompt, image=image)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: BaseLLMClient.create_structured_completion() missing 1 required positional argument: 'self'
+2025-10-25 12:45:43,450 - INFO - Updated source 68fc6403c2ea9007fad0575c status to failed
+2025-10-25 12:45:43,450 - ERROR - Failed to ingest {'type': 'pdf', 'path': 'documents/1706.03762v7.pdf'}: BaseLLMClient.create_structured_completion() missing 1 required positional argument: 'self'
+Traceback (most recent call last):
+  File "/home/vhkmay/Downloads/de_an/De_An/main.py", line 76, in ingest_sources
+    result = await self._ingest_pdf(source['path'])
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/main.py", line 109, in _ingest_pdf
+    source_id = await self.pipeline.process_document_async(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/Pipeline.py", line 75, in process_document_async
+    kus = await self._process_pdf_optimized(file_path, source_id, source_uri)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/Pipeline.py", line 142, in _process_pdf_optimized
+    enriched_batch = await self.enricher.enrich_batch(batch)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/enrichment/enricher.py", line 52, in enrich_batch
+    return await asyncio.gather(*tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/vhkmay/Downloads/de_an/De_An/src/enrichment/enricher.py", line 40, in _enrich_item
+    enrichment_result = await self.client.create_structured_completion(prompt=prompt, image=image)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: BaseLLMClient.create_structured_completion() missing 1 required positional argument: 'self'
+2025-10-25 12:45:43,450 - INFO - Ingesting YouTube: https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo
+2025-10-25 12:45:43,450 - INFO - Downloading audio for: https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo
+ERROR: unable to download video data: HTTP Error 403: Forbidden
+2025-10-25 12:45:45,143 - ERROR - Failed to download audio from https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo: ERROR: unable to download video data: HTTP Error 403: Forbidden
+2025-10-25 12:45:45,144 - INFO - Processed 1 sources in 1.69 seconds.
+2025-10-25 12:45:45,144 - INFO - Ingesting website: https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw
+2025-10-25 12:45:45,144 - INFO - Starting extraction for 1 URLs with 10 workers...
+2025-10-25 12:45:45,144 - INFO - Fetching content from: https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw
+2025-10-25 12:45:45,708 - INFO - Successfully extracted text from: https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw
+2025-10-25 12:45:45,709 - INFO - Completed extraction of 1/1 URLs in 0.57 seconds.
+2025-10-25 12:45:45,709 - INFO - ✓ Batch ingestion completed in 6.22s
+2025-10-25 12:45:45,709 - INFO -   - Successful: 1/3
+
+Ingestion Summary:
+  [FAILED] pdf: documents/1706.03762v7.pdf
+    Error: BaseLLMClient.create_structured_completion() missing 1 required positional argument: 'self'
+  [FAILED] youtube: https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo
+    Error: No transcript extracted
+  [SUCCESS] website: https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw
+2025-10-25 12:45:45,709 - INFO - 
+================================================================================
+2025-10-25 12:45:45,709 - INFO - STEP 2: QUERYING THE SYSTEM
+2025-10-25 12:45:45,709 - INFO - ================================================================================
+2025-10-25 12:45:45,709 - INFO - Processing query: "
+    What are the main architectural innovations i..."
+2025-10-25 12:45:45,709 - INFO - Query cache MISS. Processing query...
+2025-10-25 12:45:45,709 - INFO -   [1/4] Embedding query with voyage-3
+2025-10-25 12:45:46,319 - INFO -   [2/4] Retrieving top-20 candidates...
+2025-10-25 12:45:46,372 - INFO - Vector search returned 0 results
+2025-10-25 12:45:46,372 - INFO - ✓ Query completed in 0.663s
+
+================================================================================
+ANSWER:
+================================================================================
+I could not find any relevant information in the knowledge base.
+
+================================================================================
+SOURCES:
+================================================================================
+
+================================================================================
+RETRIEVAL STATS:
+================================================================================
+================================================================================
+
+2025-10-25 12:45:46,398 - INFO - MongoDB connection closed
+2025-10-25 12:45:46,398 - INFO - System shutdown complete
