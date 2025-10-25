@@ -219,6 +219,7 @@ class PDFUtils:
     @staticmethod
     def initialize_layoutparser_model():
         """Pre-load model to be cached for worker processes."""
+        global LAYOUTPARSER_AVAILABLE
         if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
             return
         try:
@@ -230,7 +231,6 @@ class PDFUtils:
             logger.info(" LayoutParser model loaded successfully")
         except Exception as e:
             logger.warning(f"  LayoutParser model initialization failed: {e}")
-            global LAYOUTPARSER_AVAILABLE
             LAYOUTPARSER_AVAILABLE = False
 
     @staticmethod
@@ -441,9 +441,7 @@ class PDFUtils:
         
         return table_objects
     
-        @staticmethod
-    
-# ----- Public method ----- #
+    # ----- Public method ----- #
     @staticmethod
     def extract_text_blocks(page: fitz.Page, page_num: int, min_length: int = 50) -> List[Dict]:
         """Extract text blocks with position info"""

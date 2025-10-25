@@ -45,6 +45,9 @@ class GeminiConfig(BaseModel):
     model_name: str = Field(default="gemini-2.5-flash")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=8192)
+
+    class Config:
+        protected_namespaces = () 
     
     @field_validator('api_key')
     @classmethod

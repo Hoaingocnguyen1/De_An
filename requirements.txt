@@ -26,7 +26,7 @@ trafilatura==1.6.3
 requests==2.31.0
 
 # Text Processing
-langchai
+langchain
 langchain-text-splitters
 
 # Data Processing

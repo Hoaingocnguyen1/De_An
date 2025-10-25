@@ -5,23 +5,35 @@ MongoDB Schema Definitions for Knowledge Units
 
 from datetime import datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field
 from bson import ObjectId
+from pydantic import BaseModel, Field, GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
+
 
 class PyObjectId(ObjectId):
+    """Custom type for MongoDB ObjectId compatible with Pydantic v2."""
+
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        # Validation logic for ObjectId
+        return core_schema.no_info_after_validator_function(
+            cls.validate,
+            core_schema.str_schema()
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        json_schema = handler(core_schema)
+        json_schema.update(type="string", examples=["655f2f5ea77a1c001eaa7e2c"])
+        return json_schema
 
     @classmethod
     def validate(cls, v):
+        """Ensure valid MongoDB ObjectId."""
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid ObjectId")
         return ObjectId(v)
-
-    @classmethod
-    def __modify_schema__(cls, field_schema):
-        field_schema.update(type="string")
 
 
 class RawContent(BaseModel):
@@ -61,25 +73,25 @@ class Embeddings(BaseModel):
 class KnowledgeUnit(BaseModel):
     """Main Knowledge Unit schema"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
-    
+
     # Source metadata
     source_id: PyObjectId
     source_type: Literal["pdf", "youtube", "video", "text"]
     source_uri: str
-    
+
     # KU metadata
     ku_id: str  # Human-readable ID like "pdf_page5_fig1"
     ku_type: Literal["text_chunk", "figure", "table", "video_frame"]
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # Content layers
     raw_content: RawContent
     context: Context
     enriched_content: Optional[EnrichedContent] = None
     embeddings: Optional[Embeddings] = None
-    
+
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
 
@@ -87,24 +99,24 @@ class KnowledgeUnit(BaseModel):
 class SourceDocument(BaseModel):
     """Source document tracking schema"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
-    
+
     source_type: Literal["pdf", "youtube", "video", "text"]
     source_uri: str
     original_filename: Optional[str] = None
-    
+
     # Processing status
     status: Literal["pending", "processing", "completed", "failed"] = "pending"
     error_message: Optional[str] = None
-    
+
     # Statistics
     total_kus: int = 0
     processing_start: Optional[datetime] = None
     processing_end: Optional[datetime] = None
-    
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}

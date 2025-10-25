@@ -302,10 +302,9 @@ async def main():
     
     # ==================== CONFIGURATION ====================
     SOURCES_TO_INGEST = [
-        {'type': 'pdf', 'path': 'documents/pdfs/paper1.pdf'},
-        # {'type': 'pdf', 'path': 'documents/pdfs/paper2.pdf'},
-        # {'type': 'youtube', 'url': 'https://youtube.com/watch?v=...'},
-        # {'type': 'website', 'url': 'https://example.com/article'},
+        {'type': 'pdf', 'path': 'documents/1706.03762v7.pdf'},
+        {'type': 'youtube', 'url': 'https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo'},
+        {'type': 'website', 'url': 'https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw'},
     ]
     
     QUESTION = """
