@@ -1,7 +1,3 @@
-"""
-src/enrichment/clients/gemini_client.py
-Enhanced Gemini client with synthesis capabilities for Gemini 2.0 Flash
-"""
 import google.generativeai as genai
 from PIL import Image
 import io
@@ -26,6 +22,9 @@ class GeminiClient(BaseLLMClient):
         model_name: str = "gemini-2.0-flash-exp",
         temperature: float = 0.7
     ):
+        # Call the parent class's initializer
+        super().__init__()
+        
         genai.configure(api_key=api_key)
         self.model_name = model_name
         self.temperature = temperature

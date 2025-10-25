@@ -47,10 +47,6 @@ class TableStructureReconstructor:
     def detect_header_rows(df: pd.DataFrame, max_header_rows: int = 5) -> int:
         """
         Detect how many rows are headers (not data)
-        
-        Strategy:
-        - Headers contain text, few numbers
-        - Data rows contain mostly numbers or specific patterns
         """
         if len(df) < 2:
             return 1
@@ -58,11 +54,7 @@ class TableStructureReconstructor:
         header_count = 0
         for i in range(min(max_header_rows, len(df))):
             row = df.iloc[i]
-            
-            # Convert to string and check
             row_str = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-            
-            # Count numeric vs text tokens
             tokens = row_str.split()
             if not tokens:
                 header_count += 1
@@ -71,15 +63,13 @@ class TableStructureReconstructor:
             numeric_tokens = sum(1 for t in tokens if re.match(r'^[\d\.\,\%\±]+$', t))
             text_tokens = len(tokens) - numeric_tokens
             
-            # If mostly text or contains keywords, it's likely header
-            header_keywords = ['retrieval', 'caption', 'accuracy', 'score', 'model',
-                              'method', 'task', 'dataset', 'metric']
+            header_keywords = ['retrieval', 'caption', 'accuracy', 'score', 'model', 'method', 'task', 'dataset', 'metric']
             has_keywords = any(kw in row_str.lower() for kw in header_keywords)
             
             if text_tokens > numeric_tokens or has_keywords or numeric_tokens == 0:
                 header_count += 1
             else:
-                break  # Found data row
+                break
         
         return max(1, header_count)
 
@@ -87,61 +77,34 @@ class TableStructureReconstructor:
     def clean_noise_rows(df: pd.DataFrame, caption: str = "") -> pd.DataFrame:
         """Remove noise rows (captions, empty rows)"""
         cleaned_rows = []
-        
-        for idx, row in df.iterrows():
+        for _, row in df.iterrows():
             row_text = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-            
-            # Skip if row contains caption text
             if caption and len(caption) > 20:
                 caption_words = set(caption.lower().split()[:10])
                 row_words = set(row_text.lower().split())
-                overlap = len(caption_words & row_words)
-                if overlap > len(caption_words) * 0.5:
+                if len(caption_words & row_words) > len(caption_words) * 0.5:
                     continue
             
-            # Skip if mostly empty
             non_empty = sum(1 for x in row if pd.notna(x) and str(x).strip())
-            if non_empty < len(row) * 0.3:  # Less than 30% filled
+            if non_empty < len(row) * 0.3:
                 continue
             
-            # Skip if contains table reference patterns
             if re.search(r'Table\s+\d+[\.:]?\s+', row_text, re.IGNORECASE):
                 continue
             
             cleaned_rows.append(row)
         
-        if not cleaned_rows:
-            return df
-        
-        return pd.DataFrame(cleaned_rows).reset_index(drop=True)
+        return pd.DataFrame(cleaned_rows).reset_index(drop=True) if cleaned_rows else pd.DataFrame()
 
     @staticmethod
     def reconstruct_hierarchical_headers(df: pd.DataFrame, header_rows: int) -> List[str]:
-        """
-        Reconstruct column names from multi-level headers
+        """Reconstruct column names from multi-level headers"""
+        if header_rows <= 1:
+            return [str(x) if pd.notna(x) else f"col_{i}" for i, x in enumerate(df.iloc[0])]
         
-        Example:
-        Row 0: ["", "Retrieval-FT", "", "Caption-FT", ""]
-        Row 1: ["Model", "TR@1", "IR@1", "B@4", "CIDEr"]
-        
-        Result: ["Model", "Retrieval-FT_TR@1", "Retrieval-FT_IR@1", 
-                 "Caption-FT_B@4", "Caption-FT_CIDEr"]
-        """
-        if header_rows == 1:
-            return [str(x) if pd.notna(x) else f"col_{i}" 
-                   for i, x in enumerate(df.iloc[0])]
-        
-        # Extract header rows
-        header_matrix = []
-        for i in range(header_rows):
-            row = [str(x).strip() if pd.notna(x) and str(x).strip() else "" 
-                   for x in df.iloc[i]]
-            header_matrix.append(row)
-        
+        header_matrix = [[str(x).strip() if pd.notna(x) and str(x).strip() else "" for x in df.iloc[i]] for i in range(header_rows)]
         num_cols = len(header_matrix[0])
-        final_headers = []
         
-        # Forward-fill merged cells in each header row
         for row_idx in range(len(header_matrix)):
             current_value = ""
             for col_idx in range(num_cols):
@@ -150,99 +113,56 @@ class TableStructureReconstructor:
                 else:
                     header_matrix[row_idx][col_idx] = current_value
         
-        # Combine hierarchical headers
+        final_headers = []
         for col_idx in range(num_cols):
-            parts = []
-            for row_idx in range(len(header_matrix)):
-                val = header_matrix[row_idx][col_idx]
-                if val and val not in parts:  # Avoid duplicates
-                    parts.append(val)
+            parts = [header_matrix[row_idx][col_idx] for row_idx in range(len(header_matrix))]
+            unique_parts = []
+            for part in parts:
+                if part and part not in unique_parts:
+                    unique_parts.append(part)
             
-            if parts:
-                final_headers.append("_".join(parts))
-            else:
-                final_headers.append(f"col_{col_idx}")
+            final_headers.append("_".join(unique_parts) if unique_parts else f"col_{col_idx}")
         
         return final_headers
 
     @staticmethod
     def process_table(df: pd.DataFrame, caption: str = "") -> Optional[Dict]:
-        """
-        Complete table processing pipeline
-        
-        Returns:
-            Structured table with clean headers and data
-        """
-        # Step 1: Clean noise
+        """Complete table processing pipeline"""
         df = TableStructureReconstructor.clean_noise_rows(df, caption)
-        
-        if len(df) < 2:
+        if df.empty or len(df) < 2:
             return None
         
-        # Step 2: Detect header rows
         header_rows = TableStructureReconstructor.detect_header_rows(df)
+        column_names = TableStructureReconstructor.reconstruct_hierarchical_headers(df, header_rows)
         
-        # Step 3: Reconstruct headers
-        if header_rows > 0:
-            column_names = TableStructureReconstructor.reconstruct_hierarchical_headers(
-                df, header_rows
-            )
-            
-            # Extract data rows (skip headers)
-            data_df = df.iloc[header_rows:].reset_index(drop=True)
-            data_df.columns = column_names[:len(data_df.columns)]
-        else:
-            data_df = df
-            column_names = [f"col_{i}" for i in range(len(df.columns))]
+        data_df = df.iloc[header_rows:].reset_index(drop=True)
+        data_df.columns = column_names[:len(data_df.columns)]
+        data_df = data_df.fillna("").astype(str)
+        data_df = data_df[data_df.apply(lambda x: x.str.strip().str.len().sum(), axis=1) > 0]
         
-        # Step 4: Clean data rows
-        data_df = data_df.fillna("")
-        
-        # Remove rows that are all empty
-        data_df = data_df[data_df.astype(str).apply(
-            lambda x: x.str.strip().str.len().sum(), axis=1) > 0]
-        
-        if len(data_df) == 0:
+        if data_df.empty:
             return None
         
-        # Step 5: Prepare output
         return {
-            "headers": column_names,
-            "rows": data_df.values.tolist(),
+            "headers": column_names, "rows": data_df.values.tolist(),
             "data": data_df.to_dict(orient='records'),
-            "shape": {
-                "rows": len(data_df),
-                "columns": len(data_df.columns)
-            },
-            "metadata": {
-                "header_rows_detected": header_rows,
-                "has_hierarchical_headers": header_rows > 1
-            }
+            "shape": {"rows": len(data_df), "columns": len(data_df.columns)},
+            "metadata": {"header_rows_detected": header_rows, "has_hierarchical_headers": header_rows > 1}
         }
 
 
 class PDFUtils:
-    """Enhanced utility class for PDF processing with smart table extraction"""
-    _layout_model = None
-
-
-"""
-Enhanced PDFUtils with comprehensive logging
-Add/replace these methods in src/extraction/utils.py
-"""
-
-class PDFUtils:
-    """Enhanced utility class for PDF processing with detailed logging"""
     _layout_model = None
 
     @staticmethod
     def initialize_layoutparser_model():
-        """Pre-load model to be cached for worker processes."""
+        """Pre-load model and handle initialization errors gracefully."""
         global LAYOUTPARSER_AVAILABLE
         if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
             return
         try:
             logger.info("🔧 Initializing LayoutParser model...")
+            # This model requires Detectron2
             PDFUtils._layout_model = lp.Detectron2LayoutModel(
                 'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
                 extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
@@ -251,6 +171,7 @@ class PDFUtils:
             logger.info("✓ LayoutParser model loaded successfully")
         except Exception as e:
             logger.warning(f"LayoutParser model initialization failed: {e}")
+            logger.warning("This is likely because 'Detectron2' is not installed. Please install it.")
             LAYOUTPARSER_AVAILABLE = False
 
     @staticmethod
@@ -265,7 +186,6 @@ class PDFUtils:
                 return None
 
         try:
-            logger.debug(f"Detecting layout regions on page {page.number + 1}...")
             pix = page.get_pixmap(dpi=150)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             layout = PDFUtils._layout_model.detect(img)
@@ -273,19 +193,10 @@ class PDFUtils:
             regions = {'tables': [], 'figures': [], 'text': []}
             for block in layout:
                 bbox = [block.block.x_1, block.block.y_1, block.block.x_2, block.block.y_2]
-                if block.type == "Table":
-                    regions['tables'].append(bbox)
-                elif block.type == "Figure":
-                    regions['figures'].append(bbox)
-                elif block.type in ["Text", "Title", "List"]:
-                    regions['text'].append(bbox)
-            
-            logger.debug(f"  ✓ Found: {len(regions['tables'])} tables, "
-                        f"{len(regions['figures'])} figures, "
-                        f"{len(regions['text'])} text regions")
-            
+                if block.type == "Table": regions['tables'].append(bbox)
+                elif block.type == "Figure": regions['figures'].append(bbox)
+                elif block.type in ["Text", "Title", "List"]: regions['text'].append(bbox)
             return regions
-            
         except Exception as e:
             logger.warning(f"LayoutParser detection error on page {page.number + 1}: {e}")
             return None
@@ -433,78 +344,46 @@ class PDFUtils:
             return []
         
     @staticmethod
-    def _extract_tables_advanced(page: fitz.Page, page_num: int, 
-                                 pdf_path: str) -> List[Dict]:
-        """
-        Advanced table extraction using Camelot and pdfplumber
-        """
+    def extract_images(page: fitz.Page, page_num: int, min_pixels: int = 10000) -> List[Dict]:
+        """Extract images with size filtering and logging"""
+        image_objects = []
+        for img_idx, img in enumerate(page.get_images(full=True)):
+            try:
+                xref = img[0]
+                base_image = page.parent.extract_image(xref)
+                width, height = base_image.get("width", 0), base_image.get("height", 0)
+                if width * height >= min_pixels:
+                    image_objects.append({"type": "figure", "image_data": base_image["image"], "page": page_num + 1, "width": width, "height": height, "figure_id": f"page{page_num+1}_fig{img_idx+1}"})
+            except Exception as e:
+                logger.warning(f"Failed to extract image {img_idx+1}: {e}")
+        return image_objects
+
+    @staticmethod
+    def _extract_tables_advanced(page: fitz.Page, page_num: int, pdf_path: str) -> List[Dict]:
+        """Advanced table extraction using Camelot and pdfplumber"""
         table_objects = []
-        
-        # Try Camelot
         try:
-            # Try lattice first
-            tables = camelot.read_pdf(
-                pdf_path,
-                pages=str(page_num + 1),
-                flavor='lattice'
-            )
-            
-            # If no good results, try stream
-            if len(tables) == 0 or tables[0].accuracy < 60:
-                tables = camelot.read_pdf(
-                    pdf_path,
-                    pages=str(page_num + 1),
-                    flavor='stream',
-                    edge_tol=100
-                )
-            
+            tables = camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='lattice')
+            if not tables or tables[0].accuracy < 60:
+                tables.extend(camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='stream', edge_tol=100))
             for idx, table in enumerate(tables):
-                if table.accuracy > 50:  # Quality threshold
-                    df = table.df
-                    processed = TableStructureReconstructor.process_table(df)
-                    
+                if table.accuracy > 50:
+                    processed = TableStructureReconstructor.process_table(table.df)
                     if processed:
-                        table_objects.append({
-                            "type": "table",
-                            "page": page_num + 1,
-                            "bbox": list(table._bbox) if hasattr(table, '_bbox') else [],
-                            "table_id": f"table_{page_num+1}_{idx+1}",
-                            "headers": processed["headers"],
-                            "rows": processed["rows"],
-                            "data": processed["data"],
-                            "shape": processed["shape"],
-                            "extraction_method": f"camelot_{table.flavor}",
-                            "accuracy": table.accuracy,
-                            "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
-                        })
+                        table_objects.append({"type": "table", "page": page_num + 1, "bbox": list(table._bbox) if hasattr(table, '_bbox') else [], "table_id": f"table_{page_num+1}_{idx+1}", **processed, "extraction_method": f"camelot_{table.flavor}", "accuracy": table.accuracy})
         except Exception as e:
-            logger.warning(f"Camelot extraction failed on page {page_num+1}: {e}")
-        
-        # Fallback to pdfplumber
+            if "Ghostscript" not in str(e): # Avoid redundant logging if Ghostscript is the known issue
+                logger.warning(f"Camelot extraction failed on page {page_num+1}: {e}")
+
         if not table_objects:
             try:
                 with pdfplumber.open(pdf_path) as pdf:
-                    pdf_page = pdf.pages[page_num]
-                    plumber_tables = pdf_page.extract_tables()
-                    
+                    plumber_tables = pdf.pages[page_num].extract_tables()
                     for idx, raw_table in enumerate(plumber_tables):
                         if raw_table and len(raw_table) > 1:
-                            df = pd.DataFrame(raw_table)
-                            processed = TableStructureReconstructor.process_table(df)
-                            
+                            processed = TableStructureReconstructor.process_table(pd.DataFrame(raw_table))
                             if processed:
-                                table_objects.append({
-                                    "type": "table",
-                                    "page": page_num + 1,
-                                    "bbox": [],  # pdfplumber doesn't provide bbox easily
-                                    "table_id": f"table_{page_num+1}_{idx+1}",
-                                    "headers": processed["headers"],
-                                    "rows": processed["rows"],
-                                    "data": processed["data"],
-                                    "shape": processed["shape"],
-                                    "extraction_method": "pdfplumber",
-                                    "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
-                                })
+                                table_objects.append({"type": "table", "page": page_num + 1, "bbox": [], "table_id": f"table_{page_num+1}_{idx+1}", **processed, "extraction_method": "pdfplumber"})
             except Exception as e:
                 logger.warning(f"pdfplumber extraction failed on page {page_num+1}: {e}")
         
@@ -549,104 +428,59 @@ class PDFUtils:
     def extract_images(page: fitz.Page, page_num: int, min_pixels: int = 10000) -> List[Dict]:
         """Extract images with size filtering and logging"""
         image_objects = []
-        logger.debug(f" Extracting images from page {page_num + 1}...")
-        
-        total_images = len(page.get_images(full=True))
-        extracted_count = 0
-        skipped_small = 0
-        
         for img_idx, img in enumerate(page.get_images(full=True)):
             try:
                 xref = img[0]
                 base_image = page.parent.extract_image(xref)
-                width = base_image.get("width", 0)
-                height = base_image.get("height", 0)
-                pixels = width * height
-                
-                if pixels >= min_pixels:
-                    image_objects.append({
-                        "type": "figure",
-                        "image_data": base_image["image"],
-                        "page": page_num + 1,
-                        "width": width,
-                        "height": height,
-                        "figure_id": f"page{page_num+1}_fig{img_idx+1}"
-                    })
-                    extracted_count += 1
-                    logger.debug(f" Extracted image {img_idx+1}: {width}x{height}px ({pixels:,} pixels)")
-                else:
-                    skipped_small += 1
-                    logger.debug(f" Skipped small image: {width}x{height}px ({pixels:,} < {min_pixels:,})")
-                    
+                width, height = base_image.get("width", 0), base_image.get("height", 0)
+                if width * height >= min_pixels:
+                    image_objects.append({"type": "figure", "image_data": base_image["image"], "page": page_num + 1, "width": width, "height": height, "figure_id": f"page{page_num+1}_fig{img_idx+1}"})
             except Exception as e:
-                logger.warning(f" Failed to extract image {img_idx+1}: {e}")
-        
-        if total_images > 0:
-            logger.info(f" Page {page_num+1} images: {extracted_count}/{total_images} extracted, "
-                       f"{skipped_small} skipped (too small)")
-        
+                logger.warning(f"Failed to extract image {img_idx+1}: {e}")
         return image_objects
 
     @staticmethod
     def extract_tables(page: fitz.Page, page_num: int, pdf_path: Optional[str] = None, 
-                      use_layoutparser: bool = True) -> List[Dict]:
-        """Extract tables with smart structure reconstruction and detailed logging"""
+                       use_layoutparser: bool = True) -> List[Dict]:
+        """Extract tables with corrected logic and fallbacks."""
         table_objects = []
-        logger.debug(f" Extracting tables from page {page_num + 1}...")
-        
-        # Method 1: LayoutParser detection
-        if use_layoutparser and LAYOUTPARSER_AVAILABLE:
-            layout_regions = PDFUtils.detect_layout_regions(page)
-            if layout_regions and layout_regions['tables']:
-                logger.info(f" LayoutParser detected {len(layout_regions['tables'])} table regions")
-                for idx, bbox in enumerate(layout_regions['tables']):
-                    logger.debug(f"    Processing table region {idx+1}...")
-                    table_objects.extend(PDFUtils.extract_table_from_bbox(page, page_num, pdf_path, bbox))
-                return table_objects
-        
-        # Method 2: PyMuPDF built-in
-        logger.debug(f"  Trying PyMuPDF table extraction...")
+        logger.debug(f"Extracting tables from page {page_num + 1}...")
+
+        # Method 1: PyMuPDF built-in (Corrected)
+        logger.debug("  Trying PyMuPDF table extraction...")
         try:
-            tables = page.find_tables()
-            logger.debug(f"  Found {len(tables)} potential tables with PyMuPDF")
-            
-            for idx, t in enumerate(tables):
+            # The find_tables() result is an iterable TableFinder object, not a list.
+            # We iterate over it. If no tables are found, the loop is just empty.
+            tables_found = list(page.find_tables()) # Convert to list to get count
+            logger.debug(f"  Found {len(tables_found)} potential tables with PyMuPDF")
+
+            for idx, t in enumerate(tables_found):
                 try:
                     df = t.to_pandas()
                     if not df.empty:
-                        logger.debug(f" Table {idx+1}: {df.shape[0]} rows × {df.shape[1]} cols")
                         processed = TableStructureReconstructor.process_table(df)
-                        
                         if processed:
                             table_objects.append({
-                                "type": "table", 
-                                "page": page_num + 1, 
-                                "bbox": list(t.bbox),
+                                "type": "table", "page": page_num + 1, "bbox": list(t.bbox),
                                 "table_id": f"table_{page_num+1}_{idx+1}_pymupdf", 
-                                **processed,
-                                "extraction_method": "pymupdf",
+                                **processed, "extraction_method": "pymupdf",
                                 "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
                             })
-                            logger.debug(f"      ✓ Processed successfully "
-                                       f"({processed['metadata']['header_rows_detected']} header rows)")
-                        else:
-                            logger.debug(f"      ⊝ Table {idx+1} filtered out (empty after processing)")
-                            
                 except Exception as e:
-                    logger.warning(f" Failed to process table {idx+1}: {e}")
+                    logger.warning(f"  Failed to process PyMuPDF table {idx+1}: {e}")
                     
         except Exception as e:
-            logger.warning(f" PyMuPDF table extraction failed on page {page_num+1}: {e}")
-        
-        # Method 3: Advanced extraction (Camelot + pdfplumber) - fallback
+            logger.warning(f"  PyMuPDF table extraction failed on page {page_num+1}: {e}")
+
+        # Method 2: Fallback to advanced extraction (Camelot + pdfplumber)
         if not table_objects and pdf_path:
-            logger.debug(f"  No tables found, trying advanced extraction (Camelot/pdfplumber)...")
+            logger.debug("  No tables found via PyMuPDF, trying advanced extraction (Camelot/pdfplumber)...")
             table_objects.extend(PDFUtils._extract_tables_advanced(page, page_num, pdf_path))
         
         if table_objects:
-            logger.info(f" Extracted {len(table_objects)} tables from page {page_num+1}")
+            logger.info(f"  ✓ Extracted {len(table_objects)} tables from page {page_num+1}")
         else:
-            logger.debug(f" No tables found on page {page_num+1}")
+            logger.debug(f"  No tables found on page {page_num+1}")
         
         return table_objects
 
