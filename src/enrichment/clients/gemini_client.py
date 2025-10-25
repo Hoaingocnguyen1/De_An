@@ -187,7 +187,6 @@ Provide your response in JSON format:
         max_retries: int = 3,
         use_cache: bool = True
     ) -> Optional[BaseModel]:
-
         # Check cache
         cache_key = None
         if use_cache:
@@ -195,32 +194,21 @@ Provide your response in JSON format:
             if cache_key in self._cache:
                 return self._cache[cache_key]
         
-        # Get JSON schema
-        schema = response_model.model_json_schema()
-        
-        # Build strict prompt
-        system_instruction = f"""You are a structured data extraction assistant.
-You MUST respond with valid JSON matching this exact schema:
+        # Chỉ gửi prompt gốc, để Gemini tự infer từ response_model
+        full_prompt = f"""{prompt}
 
-{json.dumps(schema, indent=2)}
-
-Rules:
-- Return ONLY valid JSON, no markdown, no explanations
-- All required fields must be present
-- Respect field types and constraints
-- Use null for optional missing fields"""
-
-        full_prompt = f"{system_instruction}\n\n{prompt}"
+    IMPORTANT: Return ONLY valid JSON matching the expected structure. No explanations, no markdown."""
         
         # Prepare content
         content = [full_prompt]
         if image:
             content.insert(0, image)
         
-        # Configure for JSON output
+        # Configure for JSON output - KEY: Use response_schema instead of mime_type
         generation_config = GenerationConfig(
-            temperature=0.1,  # Low temperature for structured output
-            response_mime_type="application/json",  # Force JSON
+            temperature=0.1,
+            response_mime_type="application/json",
+            response_schema=response_model  # Gemini sẽ enforce schema này
         )
         
         # Retry loop
@@ -237,7 +225,7 @@ Rules:
                     logger.warning(f"Empty response (attempt {attempt + 1})")
                     continue
                 
-                # Parse with Pydantic (will validate)
+                # Parse directly - Gemini đã enforce schema rồi
                 result = response_model.model_validate_json(response.text)
                 
                 # Cache and return

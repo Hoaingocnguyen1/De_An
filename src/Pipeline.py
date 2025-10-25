@@ -123,116 +123,138 @@ class OptimizedPipeline:
             page_num = page_img_obj['page'] - 1
             page_image = page_img_obj['image']
             
-            # VLM layout detection
-            layout = await PDFUtils.detect_layout_with_vlm(
-                page_image, self.enricher.client, page_num
-            )
-            
-            if not layout:
-                logger.warning(f"Page {page_num+1}: VLM layout detection failed, skipping")
-                continue
-            
-            for region in layout.regions:
-                # Crop region từ page image
-                bbox = region.bbox
+            # Wrap VLM call in try-except để không block text extraction
+            try:
+                layout = await PDFUtils.detect_layout_with_vlm(
+                    page_image, self.enricher.client, page_num
+                )
                 
-                # Validate bbox
-                if bbox.x2 <= bbox.x1 or bbox.y2 <= bbox.y1:
-                    logger.warning(f"Page {page_num+1}: Invalid bbox, skipping region")
+                if not layout:
+                    logger.warning(f"Page {page_num+1}: VLM layout detection failed, skipping VLM extraction")
                     continue
                 
-                try:
-                    cropped = page_image.crop((bbox.x1, bbox.y1, bbox.x2, bbox.y2))
-                except Exception as e:
-                    logger.error(f"Page {page_num+1}: Crop failed - {e}")
-                    continue
-                
-                if region.type == "table":
-                    table_data = await PDFUtils.extract_table_with_vlm(
-                        cropped, self.enricher.client, page_num, region.description
-                    )
+                for region in layout.regions:
+                    try:
+                        bbox = region.bbox
+                        
+                        # Validate bbox
+                        if bbox.x2 <= bbox.x1 or bbox.y2 <= bbox.y1:
+                            logger.warning(f"Page {page_num+1}: Invalid bbox, skipping region")
+                            continue
+                        
+                        cropped = page_image.crop((bbox.x1, bbox.y1, bbox.x2, bbox.y2))
+                        
+                        if region.type == "table":
+                            table_data = await PDFUtils.extract_table_with_vlm(
+                                cropped, self.enricher.client, page_num, region.description
+                            )
+                            
+                            if table_data and table_data.get('data') and len(table_data['data']) > 0:
+                                tables_detected.append(table_data)
+                            else:
+                                logger.warning(f"Page {page_num+1}: Table extraction returned empty data")
+                        
+                        elif region.type == "figure":
+                            figure_data = await PDFUtils.analyze_figure_with_vlm(
+                                cropped, self.enricher.client, page_num, region.description
+                            )
+                            if figure_data:
+                                figure_data['image_data'] = cropped
+                                figures_detected.append(figure_data)
                     
-                    # Validate table có data không
-                    if table_data and table_data.get('data') and len(table_data['data']) > 0:
-                        tables_detected.append(table_data)
-                    else:
-                        logger.warning(f"Page {page_num+1}: Table extraction returned empty data")
-                
-                elif region.type == "figure":
-                    figure_data = await PDFUtils.analyze_figure_with_vlm(
-                        cropped, self.enricher.client, page_num, region.description
-                    )
-                    if figure_data:
-                        figure_data['image_data'] = cropped
-                        figures_detected.append(figure_data)
+                    except Exception as e:
+                        logger.error(f"Page {page_num+1}: Region processing failed - {e}")
+                        continue  # Continue to next region
+            
+            except Exception as e:
+                logger.error(f"Page {page_num+1}: VLM processing failed - {e}")
+                continue  # Continue to next page
 
         logger.info(f"  Detected {len(tables_detected)} tables, {len(figures_detected)} figures")
         
+        # ✅ [3/5] Text processing - ALWAYS runs regardless of VLM success
         logger.info("[3/5] Chunking & enriching text...")
         text_kus = []
 
         for txt_obj in text_objs:
-            # Chunk text
-            chunks = self.embedder.embed_text_chunk(txt_obj['text'])
-            logger.info(f"  Page {txt_obj['page']}: Created {len(chunks)} text chunks")
-            
-            for idx, chunk in enumerate(chunks):
-                # Enrich từng chunk
-                try:
-                    enrichment = await self._enrich_text_chunk(chunk['text_chunk'])
-                except Exception as e:
-                    logger.error(f"Enrichment failed for chunk {idx}: {e}")
-                    enrichment = {'summary': '', 'keywords': []}
+            try:
+                # Chunk text
+                chunks = self.embedder.embed_text_chunk(txt_obj['text'])
+                logger.info(f"  Page {txt_obj['page']}: Created {len(chunks)} text chunks")
                 
-                text_kus.append({
-                    'type': 'text_chunk',
-                    'page': txt_obj['page'],
-                    'chunk_index': idx,
-                    'text': chunk['text_chunk'],
-                    'embedding_vector': chunk['vector'],
-                    'source_text': chunk['text_chunk'],
-                    'embedding_type': 'text',
-                    'enrichment': enrichment
-                })
+                for idx, chunk in enumerate(chunks):
+                    # ✅ Enrich với error handling
+                    try:
+                        enrichment = await self._enrich_text_chunk(chunk['text_chunk'])
+                    except Exception as e:
+                        logger.error(f"Enrichment failed for chunk {idx}: {e}")
+                        enrichment = {'summary': chunk['text_chunk'][:200], 'keywords': []}
+                    
+                    text_kus.append({
+                        'type': 'text_chunk',
+                        'page': txt_obj['page'],
+                        'chunk_index': idx,
+                        'text': chunk['text_chunk'],
+                        'embedding_vector': chunk['vector'],
+                        'source_text': chunk['text_chunk'],
+                        'embedding_type': 'text',
+                        'enrichment': enrichment
+                    })
+            
+            except Exception as e:
+                logger.error(f"Failed to process text from page {txt_obj['page']}: {e}")
+                continue  # ✅ Skip failed page but continue
 
         logger.info(f"  ✓ Created {len(text_kus)} text chunks with enrichment")
         
+        # [4/5] Process tables/figures (optional)
         logger.info("[4/5] Enriching & embedding tables/figures...")
         table_kus = []
         for table in tables_detected:
-            # Table đã có structure từ VLM, chỉ cần enrich summary
-            enrichment = await self._enrich_table(table)
-            emb_data = self.embedder.embed_table(
-                table['data'], table['caption'], enrichment.get('summary','')
-            )
-            if emb_data['vector']:
-                table_kus.append({
-                    'type':'table',
-                    'page':table['page'],
-                    'data':table['data'],
-                    'caption':table['caption'],
-                    'enrichment':enrichment,
-                    'embedding_vector':emb_data['vector']
-                })
+            try:
+                enrichment = await self._enrich_table(table)
+                emb_data = self.embedder.embed_table(
+                    table['data'], table['caption'], enrichment.get('summary','')
+                )
+                if emb_data['vector']:
+                    table_kus.append({
+                        'type':'table',
+                        'page':table['page'],
+                        'data':table['data'],
+                        'caption':table['caption'],
+                        'enrichment':enrichment,
+                        'embedding_vector':emb_data['vector']
+                    })
+            except Exception as e:
+                logger.error(f"Failed to process table: {e}")
+                continue
         
         figure_kus = []
         for figure in figures_detected:
-            # Figure đã có analysis từ VLM, chỉ cần enrich summary
-            enrichment = await self._enrich_figure(figure)
-            emb_data = self.embedder.embed_figure(
-                figure['image_data'], figure['caption'], enrichment.get('summary','')
-            )
-            if emb_data['vector']:
-                figure_kus.append({
-                    'type':'figure',
-                    'page':figure['page'],
-                    'caption':figure['caption'],
-                    'enrichment':enrichment,
-                    'embedding_vector':emb_data['vector']
-                })
+            try:
+                enrichment = await self._enrich_figure(figure)
+                emb_data = self.embedder.embed_figure(
+                    figure['image_data'], figure['caption'], enrichment.get('summary','')
+                )
+                if emb_data['vector']:
+                    figure_kus.append({
+                        'type':'figure',
+                        'page':figure['page'],
+                        'caption':figure['caption'],
+                        'enrichment':enrichment,
+                        'embedding_vector':emb_data['vector']
+                    })
+            except Exception as e:
+                logger.error(f"Failed to process figure: {e}")
+                continue
         
         logger.info(f"[5/5] Creating {len(text_kus)+len(table_kus)+len(figure_kus)} KUs...")
         all_kus = text_kus + table_kus + figure_kus
+        
+        if not all_kus:
+            logger.error(" No KUs created - all extraction failed!")
+            return []
+        
         return self._create_knowledge_units(all_kus, source_id, "pdf", source_uri)
 
     async def _enrich_text_chunk(self, text):

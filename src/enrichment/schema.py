@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 
 class BoundingBox(BaseModel):
     """Bounding box coordinates"""
-    x1: float = Field(ge=0, description="Left X coordinate")
-    y1: float = Field(ge=0, description="Top Y coordinate")
-    x2: float = Field(gt=0, description="Right X coordinate")
-    y2: float = Field(gt=0, description="Bottom Y coordinate")
+    x1: float = Field(description="Left X coordinate")
+    y1: float = Field(description="Top Y coordinate")
+    x2: float = Field(description="Right X coordinate")
+    y2: float = Field(description="Bottom Y coordinate")
     
     def validate_box(self) -> bool:
         return self.x2 > self.x1 and self.y2 > self.y1
@@ -15,43 +15,35 @@ class LayoutRegion(BaseModel):
     """Single layout region detected by VLM"""
     type: Literal["table", "figure"]
     bbox: BoundingBox
-    confidence: float = Field(ge=0.0, le=1.0, default=0.9)
-    description: str = Field(max_length=10000)
+    confidence: float
+    description: str
 
 class LayoutDetectionOutput(BaseModel):
     """Complete page layout analysis"""
-    regions: List[LayoutRegion] = Field(min_items=0)
-    page_type: Literal["single_column", "double_column", "mixed"] = "single_column"
-    has_header: bool = False
-    has_footer: bool = False
+    regions: List[LayoutRegion]
+    page_type: Literal["single_column", "double_column", "mixed"]
+    has_header: bool
+    has_footer: bool
 
 class TableCell(BaseModel):
     """Single table cell with position"""
-    row: int = Field(ge=0)
-    col: int = Field(ge=0)
+    row: int
+    col: int
     value: str
-    is_header: bool = False
-    rowspan: int = Field(ge=1, default=1)
-    colspan: int = Field(ge=1, default=1)
+    is_header: bool
+    rowspan: int
+    colspan: int
 
 class TableExtractionOutput(BaseModel):
     """Structured table extraction with flexible validation"""
     headers: List[str] = Field(
-        min_length=1, 
         description="Column headers (at least 1 required)"
     )
-    rows: List[List[str]] = Field(
-        default_factory=list, 
-        description="Data rows (can be empty)"
-    )
-    metadata: dict = Field(default_factory=dict)
-    num_rows: int = Field(ge=0, description="Number of data rows")
-    num_cols: int = Field(ge=1, description="Number of columns (at least 1)")
-    has_merged_cells: bool = False
-    extraction_confidence: float = Field(
-        ge=0.0, 
-        le=1.0, 
-        default=0.8,
+    rows: List[List[str]] = Field(description="Data rows (can be empty)")
+    num_rows: int = Field(description="Number of data rows")
+    num_cols: int = Field(description="Number of columns (at least 1)")
+    has_merged_cells: bool
+    extraction_confidence: float = Field( 
         description="Confidence score"
     )
     
@@ -67,7 +59,7 @@ class NumericalData(BaseModel):
     """Numerical data extracted from figure"""
     label: str
     value: float
-    unit: Optional[str] = None
+    unit: Optional[str]
 
 class FigureAnalysisOutput(BaseModel):
     """Deep figure analysis for R&D"""
@@ -76,46 +68,40 @@ class FigureAnalysisOutput(BaseModel):
         "architecture_diagram", "flowchart", "confusion_matrix",
         "photo", "illustration", "other"
     ]
-    key_findings: List[str] = Field(max_items=10, description="Main insights")
-    numerical_data: List[NumericalData] = Field(default_factory=list)
-    labels_detected: List[str] = Field(default_factory=list)
-    has_legend: bool = False
-    relevance_to_research: str = Field(max_length=10000)
-    extraction_confidence: float = Field(ge=0.0, le=1.0)
+    key_findings: List[str] = Field(description="Main insights")
+    numerical_data: List[NumericalData]
+    labels_detected: List[str]
+    has_legend: bool
+    relevance_to_research: str
+    extraction_confidence: float
 
 class ResearchMetadata(BaseModel):
     """R&D-specific enrichment"""
     paper_section: Literal[
         "abstract", "introduction", "related_work", "methodology",
         "experiments", "results", "discussion", "conclusion", "unknown"
-    ] = "unknown"
+    ]
     
     methodology_keywords: List[str] = Field(
-        default_factory=list,
         description="ML methods, algorithms mentioned"
     )
     
     metrics_mentioned: Dict[str, float] = Field(
-        default_factory=dict,
         description="Performance metrics with values"
     )
     
     citations_mentioned: List[str] = Field(
-        default_factory=list,
-        max_items=10,
         description="Paper citations in this chunk"
     )
     
-    datasets_mentioned: List[str] = Field(default_factory=list)
+    datasets_mentioned: List[str]
     
     contributions: List[str] = Field(
-        default_factory=list,
-        max_items=3,
         description="Key contributions in this section"
     )
 
 class EnrichmentOutput(BaseModel):
     """Enrichment with research metadata"""
-    summary: str = Field(min_length=20, max_length=500)
-    keywords: List[str] = Field(min_items=1, max_items=10)
-    research_metadata: Optional[ResearchMetadata] = None
+    summary: str
+    keywords: List[str]
+    research_metadata: Optional[ResearchMetadata]

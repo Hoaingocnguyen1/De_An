@@ -168,39 +168,55 @@ class PDFUtils:
             return None
 
     @staticmethod
-    def extract_all_text_optimized(page: fitz.Page, min_length: int = 1000) -> str:
+    def extract_all_text_optimized(pdf_path: str, page_num: int, min_length: int = 10) -> str:
         """
-        Extract ALL text from page
-        Returns full page text as single string
+        Extract ALL text from a page using multiple libraries and return the best result.
         """
         try:
-            # Method 1: Get all text as single string
-            full_text = page.get_text("text")
+            # Method 1 & 2: PyMuPDF (fitz)
+            doc = fitz.open(pdf_path)
+            page = doc.load_page(page_num)
             
-            # DEBUG: Log what we got
-            logger.debug(f"Page {page.number + 1}: Extracted {len(full_text)} chars")
+            text1 = page.get_text("text", sort=True).strip()
             
-            if len(full_text.strip()) >= min_length:
-                return full_text.strip()
-            
-            # Fallback: Try blocks method if text is too short
-            logger.debug(f"Page {page.number + 1}: Text too short, trying blocks method")
-            blocks = page.get_text("dict")["blocks"]
+            blocks = page.get_text("dict", sort=True)["blocks"]
             text_parts = []
-            
             for block in blocks:
-                if block.get("type") == 0:  # Text block
+                if block.get("type") == 0:
                     for line in block.get("lines", []):
                         for span in line.get("spans", []):
-                            text_parts.append(span.get("text", ""))
+                            text_parts.append(span.get("text", "").strip())
+            text2 = " ".join(filter(None, text_parts))
             
-            full_text = " ".join(text_parts)
-            logger.debug(f"Page {page.number + 1}: Blocks method got {len(full_text)} chars")
-            
-            return full_text.strip()
+            doc.close()
+
+            # Method 3: pdfplumber
+            text3 = ""
+            try:
+                with pdfplumber.open(pdf_path) as pdf:
+                    page_to_extract = pdf.pages[page_num]
+                    # Use a larger x_tolerance and text flow for better results on multi-column layouts
+                    text3 = page_to_extract.extract_text(x_tolerance=2, use_text_flow=True).strip()
+            except Exception as e:
+                logger.warning(f"pdfplumber failed on page {page_num + 1}: {e}")
+
+
+            # Choose the longest text
+            best_text = text1
+            if len(text2) > len(best_text):
+                best_text = text2
+            if len(text3) > len(best_text):
+                best_text = text3
+
+            if len(best_text) < min_length:
+                logger.warning(f"Page {page_num + 1}: Extracted text ({len(best_text)} chars) is shorter than min_length ({min_length}). Returning empty.")
+                return ""
+
+            logger.info(f"Page {page_num + 1}: Extracted {len(best_text)} chars.")
+            return best_text
         
         except Exception as e:
-            logger.error(f"Failed to extract text from page {page.number + 1}: {e}")
+            logger.error(f"Failed to extract text from page {page_num + 1}: {e}")
             return ""
 
     @staticmethod

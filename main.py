@@ -416,30 +416,32 @@ async def main():
                     if source_id:
                         # Get detailed stats
                         source_doc = rag_system.pipeline.db.get_source(source_id)
-                        kus = rag_system.pipeline.db.get_kus_by_source(source_id)
-                        
-                        ku_breakdown = {}
-                        for ku in kus:
-                            ku_type = ku['ku_type']
-                            ku_breakdown[ku_type] = ku_breakdown.get(ku_type, 0) + 1
-                        
-                        print(f"\n✓ {source.get('path') or source.get('url')}")
-                        print(f"  Status: {source_doc['status']}")
-                        print(f"  Total KUs: {source_doc['total_kus']}")
-                        print(f"  Breakdown:")
-                        for ku_type, count in ku_breakdown.items():
-                            print(f"    - {ku_type}: {count}")
-                        
-                        # Show extraction methods used
-                        extraction_methods = set()
-                        for ku in kus:
-                            if ku['ku_type'] == 'table':
-                                method = ku.get('raw_content', {}).get('table_data', {}).get('metadata', {}).get('extraction_method')
-                                if method:
-                                    extraction_methods.add(method)
-                        
-                        if extraction_methods:
-                            print(f"  Extraction methods: {', '.join(extraction_methods)}")
+                        if source_doc:
+                            kus = rag_system.pipeline.db.get_kus_by_source(source_id)
+                            
+                            ku_breakdown = {}
+                            for ku in kus:
+                                ku_type = ku['ku_type']
+                                ku_breakdown[ku_type] = ku_breakdown.get(ku_type, 0) + 1
+                            
+                            print(f"\n✓ {source.get('path') or source.get('url')}")
+                            print(f"  Status: {source_doc['status']}")
+                            print(f"  Total KUs: {source_doc['total_kus']}")
+                            if ku_breakdown:
+                                print(f"  Breakdown:")
+                                for ku_type, count in ku_breakdown.items():
+                                    print(f"    - {ku_type}: {count}")
+                            
+                            # Show extraction methods used
+                            extraction_methods = set()
+                            for ku in kus:
+                                if ku['ku_type'] == 'table':
+                                    method = ku.get('raw_content', {}).get('table_data', {}).get('metadata', {}).get('extraction_method')
+                                    if method:
+                                        extraction_methods.add(method)
+                            
+                            if extraction_methods:
+                                print(f"  Extraction methods: {', '.join(extraction_methods)}")
                 
                 elif status == 'failed':
                     print(f"\n✗ {source.get('path') or source.get('url')}")

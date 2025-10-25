@@ -25,11 +25,13 @@ def _process_page_worker(args: tuple) -> List[Dict]:
     extracted_data = []
     
     try:
+        # 1. Extract full text using the new robust method
+        full_text = PDFUtils.extract_all_text_optimized(pdf_path, page_num, min_text_length)
+        
+        # We still need a fitz object for the image
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_num)
-        
-        # 1. Extract full text
-        full_text = PDFUtils.extract_all_text_optimized(page, min_text_length)
+
         if full_text:
             extracted_data.append({
                 'type': 'text_chunk',
