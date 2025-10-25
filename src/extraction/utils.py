@@ -8,6 +8,7 @@ import whisper
 import yt_dlp
 from moviepy.editor import VideoFileClip
 import torch
+from youtube_transcript_api import YouTubeTranscriptApi
 
 import fitz
 import pdfplumber
@@ -30,6 +31,14 @@ except ImportError:
 
 _MODEL_CACHE: Dict[str, whisper.Whisper] = {}
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+    YOUTUBE_TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    YOUTUBE_TRANSCRIPT_AVAILABLE = False
+    logger.warning("youtube-transcript-api not installed. Install with: pip install youtube-transcript-api")
+
 
 class TableStructureReconstructor:
     """Smart table structure reconstruction for multi-level headers"""
@@ -216,6 +225,16 @@ class PDFUtils:
     """Enhanced utility class for PDF processing with smart table extraction"""
     _layout_model = None
 
+
+"""
+Enhanced PDFUtils with comprehensive logging
+Add/replace these methods in src/extraction/utils.py
+"""
+
+class PDFUtils:
+    """Enhanced utility class for PDF processing with detailed logging"""
+    _layout_model = None
+
     @staticmethod
     def initialize_layoutparser_model():
         """Pre-load model to be cached for worker processes."""
@@ -223,14 +242,15 @@ class PDFUtils:
         if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
             return
         try:
+            logger.info("🔧 Initializing LayoutParser model...")
             PDFUtils._layout_model = lp.Detectron2LayoutModel(
                 'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
                 extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
                 label_map={0: "Text", 1: "Title", 2: "List", 3: "Table", 4: "Figure"}
             )
-            logger.info(" LayoutParser model loaded successfully")
+            logger.info("✓ LayoutParser model loaded successfully")
         except Exception as e:
-            logger.warning(f"  LayoutParser model initialization failed: {e}")
+            logger.warning(f"LayoutParser model initialization failed: {e}")
             LAYOUTPARSER_AVAILABLE = False
 
     @staticmethod
@@ -239,13 +259,13 @@ class PDFUtils:
         if not LAYOUTPARSER_AVAILABLE:
             return None
         
-        # Tải mô hình nếu chưa có
         if not PDFUtils._layout_model:
             PDFUtils.initialize_layoutparser_model()
-            if not PDFUtils._layout_model: # Nếu vẫn không tải được
+            if not PDFUtils._layout_model:
                 return None
 
         try:
+            logger.debug(f"Detecting layout regions on page {page.number + 1}...")
             pix = page.get_pixmap(dpi=150)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             layout = PDFUtils._layout_model.detect(img)
@@ -259,11 +279,16 @@ class PDFUtils:
                     regions['figures'].append(bbox)
                 elif block.type in ["Text", "Title", "List"]:
                     regions['text'].append(bbox)
+            
+            logger.debug(f"  ✓ Found: {len(regions['tables'])} tables, "
+                        f"{len(regions['figures'])} figures, "
+                        f"{len(regions['text'])} text regions")
+            
             return regions
             
         except Exception as e:
             logger.warning(f"LayoutParser detection error on page {page.number + 1}: {e}")
-            return None  
+            return None
 
     @staticmethod
     def _bbox_overlaps(bbox1: List[float], bbox2: List[float], threshold: float = 0.5) -> bool:
@@ -308,59 +333,103 @@ class PDFUtils:
         return any(PDFUtils._bbox_overlaps(bbox, region, threshold) for region in regions)
 
     @staticmethod
-    def extract_text_with_layout(page: fitz.Page, page_num: int, min_length: int, layout_blocks: Dict) -> List[Dict]:
+    def extract_text_with_layout(page: fitz.Page, page_num: int, min_length: int, 
+                                 layout_blocks: Dict) -> List[Dict]:
         """Extract text blocks, avoiding table/figure regions"""
         text_objects = []
         avoid_regions = layout_blocks.get('tables', []) + layout_blocks.get('figures', [])
+        
+        logger.debug(f"Extracting text with layout awareness "
+                    f"(avoiding {len(avoid_regions)} table/figure regions)...")
+        
+        extracted_count = 0
+        skipped_count = 0
         
         try:
             blocks = page.get_text("dict")["blocks"]
             for block in blocks:
                 if block.get("type") == 0:  # Text block
                     bbox = block.get("bbox", [])
+                    
+                    # Skip if overlaps with table/figure
                     if PDFUtils._bbox_overlaps_any(bbox, avoid_regions):
+                        skipped_count += 1
                         continue
                     
-                    text = " ".join(span.get("text", "") for line in block.get("lines", []) for span in line.get("spans", [])).strip()
+                    text = " ".join(
+                        span.get("text", "") 
+                        for line in block.get("lines", []) 
+                        for span in line.get("spans", [])
+                    ).strip()
+                    
                     if len(text) >= min_length:
                         text_objects.append({
-                            "type": "text_chunk", "text": text, "page": page_num + 1,
-                            "bbox": list(bbox), "detected_by": "layoutparser"
+                            "type": "text_chunk", 
+                            "text": text, 
+                            "page": page_num + 1,
+                            "bbox": list(bbox), 
+                            "detected_by": "layoutparser"
                         })
+                        extracted_count += 1
         except Exception as e:
-            logger.warning(f"Failed to extract text with layout on page {page_num+1}: {e}")
+            logger.warning(f" Failed to extract text with layout on page {page_num+1}: {e}")
+        
+        logger.debug(f"  ✓ Extracted {extracted_count} text blocks, skipped {skipped_count} overlapping regions")
         return text_objects
 
     @staticmethod
     def extract_table_from_bbox(page: fitz.Page, page_num: int, pdf_path: str, bbox: List[float]) -> List[Dict]:
         """Extract table from specific bbox detected by LayoutParser"""
+        logger.debug(f"    Extracting table from detected bbox...")
         try:
             tables = PDFUtils.extract_tables(page, page_num, pdf_path=pdf_path, use_layoutparser=False)
             result = []
+            
             for table in tables:
                 if PDFUtils._bbox_overlaps(table.get('bbox', []), bbox):
                     table['detected_by'] = 'layoutparser'
                     table['detection_bbox'] = bbox
                     result.append(table)
+                    logger.debug(f" Matched table in detected region")
+            
+            if not result:
+                logger.debug(f" No tables matched the detected bbox")
+            
             return result
         except Exception as e:
-            logger.warning(f"Failed to extract table from bbox on page {page_num+1}: {e}")
+            logger.warning(f"    Failed to extract table from bbox: {e}")
             return []
 
     @staticmethod
     def extract_figure_from_bbox(page: fitz.Page, page_num: int, bbox: List[float]) -> List[Dict]:
         """Extract figure image from specific bbox detected by LayoutParser"""
+        logger.debug(f"    Extracting figure from detected bbox...")
         try:
             x0, y0, x1, y1 = bbox
-            clip_rect = fitz.Rect(max(0, x0 - 10), max(0, y0 - 10), min(page.rect.width, x1 + 10), min(page.rect.height, y1 + 10))
+            clip_rect = fitz.Rect(
+                max(0, x0 - 10), 
+                max(0, y0 - 10), 
+                min(page.rect.width, x1 + 10), 
+                min(page.rect.height, y1 + 10)
+            )
             pix = page.get_pixmap(clip=clip_rect, dpi=200)
-            return [{
-                "type": "figure", "image_data": pix.tobytes(), "page": page_num + 1,
-                "width": pix.width, "height": pix.height, "bbox": bbox,
-                "figure_id": f"page{page_num+1}_fig_lp", "detected_by": "layoutparser"
-            }]
+            
+            figure = {
+                "type": "figure", 
+                "image_data": pix.tobytes(), 
+                "page": page_num + 1,
+                "width": pix.width, 
+                "height": pix.height, 
+                "bbox": bbox,
+                "figure_id": f"page{page_num+1}_fig_lp", 
+                "detected_by": "layoutparser"
+            }
+            
+            logger.debug(f"      ✓ Extracted figure: {pix.width}x{pix.height}px from LayoutParser region")
+            return [figure]
+            
         except Exception as e:
-            logger.warning(f"Failed to extract figure from bbox on page {page_num+1}: {e}")
+            logger.warning(f"    Failed to extract figure from bbox: {e}")
             return []
         
     @staticmethod
@@ -444,10 +513,14 @@ class PDFUtils:
     # ----- Public method ----- #
     @staticmethod
     def extract_text_blocks(page: fitz.Page, page_num: int, min_length: int = 50) -> List[Dict]:
-        """Extract text blocks with position info"""
+        """Extract text blocks with position info and logging"""
         text_objects = []
+        logger.debug(f"Extracting text blocks from page {page_num + 1}...")
+        
         try:
             blocks = page.get_text("dict")["blocks"]
+            text_count = 0
+            
             for block in blocks:
                 if block.get("type") == 0:  # Text block
                     text_lines = []
@@ -455,6 +528,7 @@ class PDFUtils:
                         for span in line.get("spans", []):
                             text_lines.append(span.get("text", ""))
                     text = " ".join(text_lines).strip()
+                    
                     if len(text) >= min_length:
                         text_objects.append({
                             "type": "text_chunk",
@@ -462,21 +536,34 @@ class PDFUtils:
                             "page": page_num + 1,
                             "bbox": list(block.get("bbox", []))
                         })
+                        text_count += 1
+            
+            logger.debug(f"  ✓ Extracted {text_count} text blocks (≥{min_length} chars)")
+            
         except Exception as e:
-            logger.warning(f"Failed to extract text on page {page_num+1}: {e}")
-        return text_objects
+            logger.error(f" Failed to extract text on page {page_num+1}: {e}")
         
+        return text_objects
+
     @staticmethod
     def extract_images(page: fitz.Page, page_num: int, min_pixels: int = 10000) -> List[Dict]:
-        """Extract images with size filtering"""
+        """Extract images with size filtering and logging"""
         image_objects = []
+        logger.debug(f" Extracting images from page {page_num + 1}...")
+        
+        total_images = len(page.get_images(full=True))
+        extracted_count = 0
+        skipped_small = 0
+        
         for img_idx, img in enumerate(page.get_images(full=True)):
             try:
                 xref = img[0]
                 base_image = page.parent.extract_image(xref)
                 width = base_image.get("width", 0)
                 height = base_image.get("height", 0)
-                if width * height >= min_pixels:
+                pixels = width * height
+                
+                if pixels >= min_pixels:
                     image_objects.append({
                         "type": "figure",
                         "image_data": base_image["image"],
@@ -485,44 +572,81 @@ class PDFUtils:
                         "height": height,
                         "figure_id": f"page{page_num+1}_fig{img_idx+1}"
                     })
+                    extracted_count += 1
+                    logger.debug(f" Extracted image {img_idx+1}: {width}x{height}px ({pixels:,} pixels)")
+                else:
+                    skipped_small += 1
+                    logger.debug(f" Skipped small image: {width}x{height}px ({pixels:,} < {min_pixels:,})")
+                    
             except Exception as e:
-                logger.warning(f"Failed to extract image on page {page_num+1}: {e}")
+                logger.warning(f" Failed to extract image {img_idx+1}: {e}")
+        
+        if total_images > 0:
+            logger.info(f" Page {page_num+1} images: {extracted_count}/{total_images} extracted, "
+                       f"{skipped_small} skipped (too small)")
+        
         return image_objects
 
     @staticmethod
-    def extract_tables(page: fitz.Page, page_num: int, pdf_path: Optional[str] = None, use_layoutparser: bool = True) -> List[Dict]:
-        """Extract tables with smart structure reconstruction"""
+    def extract_tables(page: fitz.Page, page_num: int, pdf_path: Optional[str] = None, 
+                      use_layoutparser: bool = True) -> List[Dict]:
+        """Extract tables with smart structure reconstruction and detailed logging"""
         table_objects = []
+        logger.debug(f" Extracting tables from page {page_num + 1}...")
         
-        # Nếu LayoutParser được bật, hãy sử dụng nó để phát hiện các vùng chứa bảng
+        # Method 1: LayoutParser detection
         if use_layoutparser and LAYOUTPARSER_AVAILABLE:
             layout_regions = PDFUtils.detect_layout_regions(page)
             if layout_regions and layout_regions['tables']:
-                for bbox in layout_regions['tables']:
+                logger.info(f" LayoutParser detected {len(layout_regions['tables'])} table regions")
+                for idx, bbox in enumerate(layout_regions['tables']):
+                    logger.debug(f"    Processing table region {idx+1}...")
                     table_objects.extend(PDFUtils.extract_table_from_bbox(page, page_num, pdf_path, bbox))
                 return table_objects
-
-        # Nếu không có LayoutParser hoặc không phát hiện được, sử dụng các phương pháp khác
-        # Method 1: PyMuPDF
+        
+        # Method 2: PyMuPDF built-in
+        logger.debug(f"  Trying PyMuPDF table extraction...")
         try:
             tables = page.find_tables()
+            logger.debug(f"  Found {len(tables)} potential tables with PyMuPDF")
+            
             for idx, t in enumerate(tables):
-                df = t.to_pandas()
-                if not df.empty:
-                    processed = TableStructureReconstructor.process_table(df)
-                    if processed:
-                        table_objects.append({
-                            "type": "table", "page": page_num + 1, "bbox": list(t.bbox),
-                            "table_id": f"table_{page_num+1}_{idx+1}_pymupdf", **processed,
-                            "extraction_method": "pymupdf",
-                            "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
-                        })
+                try:
+                    df = t.to_pandas()
+                    if not df.empty:
+                        logger.debug(f" Table {idx+1}: {df.shape[0]} rows × {df.shape[1]} cols")
+                        processed = TableStructureReconstructor.process_table(df)
+                        
+                        if processed:
+                            table_objects.append({
+                                "type": "table", 
+                                "page": page_num + 1, 
+                                "bbox": list(t.bbox),
+                                "table_id": f"table_{page_num+1}_{idx+1}_pymupdf", 
+                                **processed,
+                                "extraction_method": "pymupdf",
+                                "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
+                            })
+                            logger.debug(f"      ✓ Processed successfully "
+                                       f"({processed['metadata']['header_rows_detected']} header rows)")
+                        else:
+                            logger.debug(f"      ⊝ Table {idx+1} filtered out (empty after processing)")
+                            
+                except Exception as e:
+                    logger.warning(f" Failed to process table {idx+1}: {e}")
+                    
         except Exception as e:
-            logger.warning(f"PyMuPDF table extraction failed on page {page_num+1}: {e}")
+            logger.warning(f" PyMuPDF table extraction failed on page {page_num+1}: {e}")
         
-        # Method 2: Camelot và pdfplumber (nếu cần)
+        # Method 3: Advanced extraction (Camelot + pdfplumber) - fallback
         if not table_objects and pdf_path:
+            logger.debug(f"  No tables found, trying advanced extraction (Camelot/pdfplumber)...")
             table_objects.extend(PDFUtils._extract_tables_advanced(page, page_num, pdf_path))
+        
+        if table_objects:
+            logger.info(f" Extracted {len(table_objects)} tables from page {page_num+1}")
+        else:
+            logger.debug(f" No tables found on page {page_num+1}")
         
         return table_objects
 
@@ -607,7 +731,62 @@ class VideoUtils:
         except Exception as e:
             logger.error(f"Whisper transcription failed for {audio_path}: {e}")
             return []
+    @staticmethod
+    def get_youtube_transcript_direct(video_url: str) -> List[Dict]:
+        """
+        Get transcript directly from YouTube without downloading audio.
         
+        Much faster than download -> transcribe approach.
+        Falls back to audio download if transcript not available.
+        
+        Returns:
+            List of transcript segments with 'text', 'start', 'duration'
+        """
+        if not YOUTUBE_TRANSCRIPT_AVAILABLE:
+            logger.warning("YouTube Transcript API not available, falling back to audio download")
+            return None
+        
+        try:
+            video_id = VideoUtils.extract_video_id(video_url)
+            
+            if not video_id:
+                logger.error(f"Could not extract video ID from: {video_url}")
+                return None
+            
+            logger.info(f"Fetching transcript for video ID: {video_id}")
+            
+            # Try to get transcript (priority: English -> any available language)
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(
+                    video_id, 
+                    languages=['en', 'en-US', 'en-GB']
+                )
+            except:
+                # If English not available, get any available transcript
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                transcript = transcript_list.find_generated_transcript(['en']).fetch()
+            
+            if not transcript:
+                logger.warning(f"No transcript available for {video_id}")
+                return None
+            
+            # Convert to Whisper-like format for compatibility
+            segments = []
+            for idx, entry in enumerate(transcript):
+                segments.append({
+                    'id': idx,
+                    'text': entry['text'],
+                    'start': entry['start'],
+                    'end': entry['start'] + entry['duration'],
+                    'duration': entry['duration']
+                })
+            
+            logger.info(f"✓ Retrieved {len(segments)} transcript segments")
+            return segments
+            
+        except Exception as e:
+            logger.error(f"Failed to get YouTube transcript: {e}")
+            return None
     
 class WebsiteUtils:
     @staticmethod

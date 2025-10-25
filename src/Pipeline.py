@@ -5,8 +5,8 @@ Optimized pipeline with fixes for multimodal embedding integration
 
 import asyncio
 import io
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
 import logging
 from bson import ObjectId
 from PIL import Image
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizedPipeline:
-    """Optimized ingestion pipeline with multimodal support"""
+    """Optimized ingestion pipeline supporting PDF, YouTube, Video, Website"""
     
     def __init__(
         self,
@@ -35,7 +35,7 @@ class OptimizedPipeline:
         self.db = mongo_handler
         self.batch_size = batch_size
         
-        # Optimized and modular components
+        # Optimized components
         self.pdf_extractor = PDFExtractor(use_layoutparser=False)
         self.enricher = ContentEnricher(client=llm_client, max_concurrent=10)
         self.embedder = content_embedder
@@ -54,32 +54,52 @@ class OptimizedPipeline:
         self,
         file_path: str,
         source_type: str,
-        source_uri: str = None
+        source_uri: str = None,
+        video_extractor = None,  # For youtube/video
+        website_extractor = None  # For website
     ) -> ObjectId:
-        """Process a document with all optimizations"""
+        """Process a document with all optimizations - supports all source types"""
         async with self.executor:
             source_uri = source_uri or file_path
             source_id = self.db.create_source({
                 "source_type": source_type,
                 "source_uri": source_uri,
-                "original_filename": file_path.split('/')[-1],
+                "original_filename": source_uri.split('/')[-1] if source_type == 'website' else file_path.split('/')[-1],
                 "status": "processing",
-                "processing_start": datetime.utcnow()
+                "processing_start": datetime.now(timezone.utc)
             })
             
             logger.info(f"⚡ Processing {source_type}: {file_path} (Source ID: {source_id})")
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             
             try:
+                # Route to appropriate processor
                 if source_type == "pdf":
                     kus = await self._process_pdf_optimized(file_path, source_id, source_uri)
+                
+                elif source_type == "youtube":
+                    if not video_extractor:
+                        raise ValueError("video_extractor required for YouTube processing")
+                    kus = await self._process_youtube(source_uri, source_id, source_uri, video_extractor)
+                
+                elif source_type == "video":
+                    if not video_extractor:
+                        raise ValueError("video_extractor required for video processing")
+                    kus = await self._process_video(file_path, source_id, source_uri, video_extractor)
+                
+                elif source_type == "website":
+                    if not website_extractor:
+                        raise ValueError("website_extractor required for website processing")
+                    kus = await self._process_website(source_uri, source_id, source_uri, website_extractor)
+                
                 else:
                     raise NotImplementedError(f"Source type '{source_type}' is not supported yet.")
                 
+                # Save to MongoDB
                 if kus:
                     ku_ids = self.db.insert_knowledge_units(kus)
                     self.db.update_source_status(source_id, "completed", total_kus=len(ku_ids))
-                    elapsed = (datetime.utcnow() - start_time).total_seconds()
+                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
                     logger.info(f"✓ Completed {file_path} in {elapsed:.1f}s - {len(ku_ids)} KUs created.")
                     return source_id
                 else:
@@ -245,10 +265,241 @@ class OptimizedPipeline:
         # Step 4: Create Knowledge Units
         logger.info("  [4/4] Finalizing Knowledge Units...")
         final_kus = self._create_knowledge_units(
-            kus_ready, source_id, source_type, source_uri
+            kus_ready, source_id, "pdf", source_uri 
         )
         
         return final_kus
+    
+    async def _process_youtube(
+        self,
+        youtube_url: str,
+        source_id: ObjectId,
+        source_uri: str,
+        video_extractor  # Pass extractor from outside
+    ) -> List[Dict]:
+        """Optimized YouTube processing workflow"""
+        
+        # Step 1: Extract transcript
+        logger.info("  [1/3] Extracting transcript...")
+        transcripts = await video_extractor.extract_from_sources([youtube_url])
+        transcript_data = transcripts.get(youtube_url, [])
+        
+        if not transcript_data:
+            raise ValueError("No transcript extracted from YouTube video")
+        
+        logger.info(f"  ✓ Extracted {len(transcript_data)} transcript segments")
+        
+        # Step 2: Batch embedding
+        logger.info("  [2/3] Generating embeddings in batches...")
+        texts_to_embed = [seg.get('text', '').strip() for seg in transcript_data if seg.get('text', '').strip()]
+        
+        if not texts_to_embed:
+            raise ValueError("No valid text found in transcript")
+        
+        # Embed all texts in batch
+        vectors = self.embedder.text_embedder.embed_batch(texts_to_embed, input_type="document")
+        
+        logger.info(f"  ✓ Generated embeddings for {len(vectors)} segments")
+        
+        # Step 3: Create Knowledge Units
+        logger.info("  [3/3] Finalizing Knowledge Units...")
+        kus = []
+        
+        for idx, (segment, vector) in enumerate(zip(transcript_data, vectors)):
+            text = segment.get('text', '').strip()
+            if not text or not vector:
+                continue
+            
+            ku = {
+                "source_id": source_id,
+                "source_type": "youtube",
+                "source_uri": source_uri,
+                "ku_id": f"youtube_{source_id}_segment_{idx}",
+                "ku_type": "text_chunk",
+                "created_at": datetime.utcnow(),
+                
+                # Raw content
+                "raw_content": {
+                    "text": text,
+                    "asset_uri": None,
+                },
+                
+                # Context
+                "context": {
+                    "page_number": None,
+                    "bounding_box": None,
+                    "start_time_seconds": segment.get('start'),
+                    "end_time_seconds": segment.get('end'),
+                    "direct_url": f"{youtube_url}&t={int(segment.get('start', 0))}s"
+                },
+                
+                # Enriched content (can be added later if needed)
+                "enriched_content": None,
+                
+                # Embeddings
+                "embeddings": {
+                    "vector": vector,
+                    "model": self.embedder.text_embedder.model_name
+                }
+            }
+            kus.append(ku)
+        
+        logger.info(f"  ✓ Created {len(kus)} knowledge units")
+        return kus
+
+
+    async def _process_website(
+        self,
+        url: str,
+        source_id: ObjectId,
+        source_uri: str,
+        website_extractor  # Pass extractor from outside
+    ) -> List[Dict]:
+        """Optimized website processing workflow"""
+        
+        # Step 1: Extract content
+        logger.info("  [1/3] Extracting website content...")
+        extracted = await website_extractor.extract_from_urls([url])
+        content = extracted.get(url)
+        
+        if not content:
+            raise ValueError("No content extracted from website")
+        
+        logger.info(f"  ✓ Extracted {len(content)} characters")
+        
+        # Step 2: Chunk and embed
+        logger.info("  [2/3] Chunking and embedding text...")
+        text_chunks = self.embedder.text_embedder.chunk_and_embed(
+            content,
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+        
+        if not text_chunks:
+            raise ValueError("No text chunks generated from website content")
+        
+        logger.info(f"  ✓ Generated {len(text_chunks)} text chunks with embeddings")
+        
+        # Step 3: Create Knowledge Units
+        logger.info("  [3/3] Finalizing Knowledge Units...")
+        kus = []
+        
+        for idx, chunk in enumerate(text_chunks):
+            ku = {
+                "source_id": source_id,
+                "source_type": "website",
+                "source_uri": source_uri,
+                "ku_id": f"website_{source_id}_text_{idx}",
+                "ku_type": "text_chunk",
+                "created_at": datetime.utcnow(),
+                
+                # Raw content
+                "raw_content": {
+                    "text": chunk['text_chunk'],
+                    "asset_uri": None,
+                },
+                
+                # Context
+                "context": {
+                    "page_number": None,
+                    "bounding_box": None,
+                    "start_time_seconds": None,
+                    "end_time_seconds": None,
+                    "direct_url": url
+                },
+                
+                # Enriched content
+                "enriched_content": None,
+                
+                # Embeddings
+                "embeddings": {
+                    "vector": chunk['vector'],
+                    "model": self.embedder.text_embedder.model_name
+                }
+            }
+            kus.append(ku)
+        
+        logger.info(f"  ✓ Created {len(kus)} knowledge units")
+        return kus
+
+
+    async def _process_video(
+        self,
+        video_path: str,
+        source_id: ObjectId,
+        source_uri: str,
+        video_extractor  # Pass extractor from outside
+    ) -> List[Dict]:
+        """Optimized local video processing workflow"""
+        
+        # Step 1: Extract transcript
+        logger.info("  [1/3] Extracting audio and transcribing...")
+        transcripts = await video_extractor.extract_from_sources([video_path])
+        transcript_data = transcripts.get(video_path, [])
+        
+        if not transcript_data:
+            raise ValueError("No transcript extracted from video file")
+        
+        logger.info(f"  ✓ Extracted {len(transcript_data)} transcript segments")
+        
+        # Step 2: Batch embedding
+        logger.info("  [2/3] Generating embeddings in batches...")
+        texts_to_embed = [seg.get('text', '').strip() for seg in transcript_data if seg.get('text', '').strip()]
+        
+        if not texts_to_embed:
+            raise ValueError("No valid text found in transcript")
+        
+        # Embed all texts in batch
+        vectors = self.embedder.text_embedder.embed_batch(texts_to_embed, input_type="document")
+        
+        logger.info(f"  ✓ Generated embeddings for {len(vectors)} segments")
+        
+        # Step 3: Create Knowledge Units
+        logger.info("  [3/3] Finalizing Knowledge Units...")
+        kus = []
+        
+        for idx, (segment, vector) in enumerate(zip(transcript_data, vectors)):
+            text = segment.get('text', '').strip()
+            if not text or not vector:
+                continue
+            
+            ku = {
+                "source_id": source_id,
+                "source_type": "video",
+                "source_uri": source_uri,
+                "ku_id": f"video_{source_id}_segment_{idx}",
+                "ku_type": "text_chunk",
+                "created_at": datetime.utcnow(),
+                
+                # Raw content
+                "raw_content": {
+                    "text": text,
+                    "asset_uri": None,
+                },
+                
+                # Context
+                "context": {
+                    "page_number": None,
+                    "bounding_box": None,
+                    "start_time_seconds": segment.get('start'),
+                    "end_time_seconds": segment.get('end'),
+                    "direct_url": None  # No direct URL for local files
+                },
+                
+                # Enriched content
+                "enriched_content": None,
+                
+                # Embeddings
+                "embeddings": {
+                    "vector": vector,
+                    "model": self.embedder.text_embedder.model_name
+                }
+            }
+            kus.append(ku)
+        
+        logger.info(f"  ✓ Created {len(kus)} knowledge units")
+        return kus
+
 
     def _create_knowledge_units(
         self,

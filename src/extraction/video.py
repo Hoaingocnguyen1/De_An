@@ -1,9 +1,3 @@
-"""
-src/extraction/video.py
-A high-performance, parallel video transcription orchestrator.
-Processes multiple local files or YouTube URLs concurrently.
-"""
-
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Union
@@ -20,120 +14,178 @@ logger = logging.getLogger(__name__)
 class VideoExtractor:
     def __init__(self, whisper_model: str = "base", max_workers: int = 4):
         """
-        Khởi tạo bộ điều phối.
-
+        Initialize video transcription orchestrator.
+        
+        Priority:
+        1. YouTube Transcript API (fastest, no download needed)
+        2. Download + Whisper (fallback for videos without transcripts)
         """
         self.model_name = whisper_model
         self.max_workers = max_workers
-        # Tải trước mô hình để nó sẵn sàng cho các luồng (thread) worker
+        # Pre-load Whisper model for fallback
         VideoUtils.load_model(self.model_name)
 
     def _process_single_source(self, source: str, temp_dir: Path) -> List[Dict]:
         """
-        Quy trình xử lý hoàn chỉnh cho một nguồn duy nhất (URL hoặc tệp cục bộ).
-        Đây là đơn vị công việc sẽ được thực thi song song.
+        Complete processing pipeline for a single source.
+        
+        For YouTube URLs:
+        1. Try to get transcript directly (fast)
+        2. If fails, download audio and transcribe (slow but reliable)
+        
+        For local files:
+        - Extract audio and transcribe with Whisper
         """
-        audio_path = None
-        # Phân biệt giữa URL và tệp cục bộ
+        # Check if it's a YouTube URL
         if source.startswith("http://") or source.startswith("https://"):
-            audio_path = VideoUtils.download_youtube_audio(source, temp_dir)
-            source_info = {"source_url": source}
-        else:
-            if Path(source).exists():
-                audio_path = VideoUtils.extract_audio_from_file(source)
-                source_info = {"source_file": source}
+            if "youtube.com" in source or "youtu.be" in source:
+                return self._process_youtube(source, temp_dir)
             else:
-                logger.error(f"Source file not found: {source}")
+                logger.warning(f"Non-YouTube URL not supported: {source}")
                 return []
+        else:
+            # Local video file
+            return self._process_local_video(source, temp_dir)
 
+    def _process_youtube(self, url: str, temp_dir: Path) -> List[Dict]:
+        """
+        Process YouTube video with transcript API first, fallback to download.
+        """
+        logger.info(f"Processing YouTube URL: {url}")
+        
+        # Method 1: Try direct transcript (fast - no download!)
+        segments = VideoUtils.get_youtube_transcript_direct(url)
+        
+        if segments:
+            logger.info("✓ Used YouTube Transcript API (no download needed)")
+            # Add source info
+            return [
+                {
+                    "type": "text_chunk",
+                    "text": seg["text"].strip(),
+                    **seg,
+                    "source_url": url,
+                    "extraction_method": "youtube_transcript_api"
+                }
+                for seg in segments
+            ]
+        
+        # Method 2: Fallback to download + transcribe
+        logger.info("Transcript not available, falling back to audio download...")
+        audio_path = VideoUtils.download_youtube_audio(url, temp_dir)
+        
         if not audio_path:
+            logger.error(f"Failed to download audio from {url}")
             return []
-
-        # Chuyển đổi âm thanh thành văn bản
+        
         segments = VideoUtils.transcribe_audio(audio_path, self.model_name)
         
-        # Dọn dẹp tệp âm thanh tạm
+        # Cleanup temp audio
         try:
             Path(audio_path).unlink()
         except OSError as e:
             logger.warning(f"Could not delete temp audio file {audio_path}: {e}")
-
-        # Định dạng kết quả cuối cùng
+        
+        # Format results
         return [
-            {"type": "text_chunk", "text": seg["text"].strip(), **seg, **source_info}
+            {
+                "type": "text_chunk",
+                "text": seg["text"].strip(),
+                **seg,
+                "source_url": url,
+                "extraction_method": "whisper"
+            }
             for seg in segments
         ]
 
-    async def extract_from_sources(self, sources: List[str], 
-                                  temp_dir_str: str = "./temp") -> Dict[str, List[Dict]]:
+    def _process_local_video(self, video_path: str, temp_dir: Path) -> List[Dict]:
         """
-        Xử lý một danh sách các nguồn video (URL hoặc tệp) song song.
+        Process local video file by extracting audio and transcribing.
+        """
+        if not Path(video_path).exists():
+            logger.error(f"Video file not found: {video_path}")
+            return []
+        
+        logger.info(f"Processing local video: {video_path}")
+        
+        # Extract audio
+        audio_path = VideoUtils.extract_audio_from_file(video_path)
+        
+        if not audio_path:
+            logger.error(f"Failed to extract audio from {video_path}")
+            return []
+        
+        # Transcribe
+        segments = VideoUtils.transcribe_audio(audio_path, self.model_name)
+        
+        # Cleanup
+        try:
+            Path(audio_path).unlink()
+        except OSError as e:
+            logger.warning(f"Could not delete temp audio file {audio_path}: {e}")
+        
+        # Format results
+        return [
+            {
+                "type": "text_chunk",
+                "text": seg["text"].strip(),
+                **seg,
+                "source_file": video_path,
+                "extraction_method": "whisper"
+            }
+            for seg in segments
+        ]
+
+    async def extract_from_sources(
+        self, 
+        sources: List[str], 
+        temp_dir_str: str = "./temp"
+    ) -> Dict[str, List[Dict]]:
+        """
+        Process multiple video sources in parallel.
         
         Args:
-            sources: Một danh sách các chuỗi, mỗi chuỗi là một URL YouTube hoặc đường dẫn tệp.
-            temp_dir_str: Thư mục để lưu trữ các tệp âm thanh tạm thời.
-
+            sources: List of YouTube URLs or local video paths
+            temp_dir_str: Directory for temporary audio files
+        
         Returns:
-            Một dictionary ánh xạ mỗi nguồn đầu vào với danh sách các đoạn transcript của nó.
+            Dictionary mapping each source to its transcript segments
         """
         start_time = time.time()
         temp_dir = Path(temp_dir_str)
         temp_dir.mkdir(exist_ok=True, parents=True)
 
+        logger.info(f"Processing {len(sources)} video sources...")
+
         loop = asyncio.get_running_loop()
-        # Sử dụng ThreadPoolExecutor để chạy các tác vụ blocking (I/O, CPU) mà không chặn event loop
+        
+        # Use ThreadPoolExecutor for I/O and CPU-bound tasks
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Tạo một tác vụ (task) cho mỗi nguồn
             tasks = [
-                loop.run_in_executor(executor, self._process_single_source, source, temp_dir)
+                loop.run_in_executor(
+                    executor, 
+                    self._process_single_source, 
+                    source, 
+                    temp_dir
+                )
                 for source in sources
             ]
-            # Chờ tất cả các tác vụ hoàn thành
+            
             results = await asyncio.gather(*tasks)
 
-        # Ánh xạ kết quả trở lại với nguồn ban đầu
+        # Map results back to sources
         final_output = {source: result for source, result in zip(sources, results)}
         
+        # Print summary
         duration = time.time() - start_time
-        logger.info(f"Processed {len(sources)} sources in {duration:.2f} seconds.")
+        successful = sum(1 for result in results if result)
+        
+        logger.info(f"✓ Processed {successful}/{len(sources)} sources in {duration:.2f}s")
+        
+        # Show extraction methods used
+        for source, segments in final_output.items():
+            if segments:
+                method = segments[0].get('extraction_method', 'unknown')
+                logger.info(f"  - {source[:50]}... : {len(segments)} segments ({method})")
+        
         return final_output
-
-
-# # --- VÍ DỤ SỬ DỤNG ---
-# async def main():
-#     # Danh sách các nguồn video cần xử lý
-#     video_sources = [
-#         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",  # Rick Astley
-#         "https://www.youtube.com/watch?v=yPYZpwSpKmA",  # Google I/O Keynote
-#         "path/to/your/local_video1.mp4",  # Thay bằng đường dẫn tệp của bạn
-#         "path/to/your/local_video2.mov",  # Thay bằng đường dẫn tệp của bạn
-#     ]
-    
-#     # Lọc ra các tệp không tồn tại để tránh lỗi
-#     valid_sources = [
-#         src for src in video_sources 
-#         if src.startswith("http") or Path(src).exists()
-#     ]
-#     if len(valid_sources) != len(video_sources):
-#         logger.warning("Some local video files were not found and will be skipped.")
-
-#     # Khởi tạo và chạy bộ điều phối
-#     # Tăng max_workers nếu bạn có nhiều CPU core và băng thông mạng tốt
-#     extractor = VideoExtractor(whisper_model="base", max_workers=4)
-#     transcripts = await extractor.extract_from_sources(valid_sources)
-
-#     # In kết quả
-#     for source, segments in transcripts.items():
-#         print("\n" + "="*50)
-#         print(f"SOURCE: {source}")
-#         print(f"SEGMENTS FOUND: {len(segments)}")
-#         if segments:
-#             # In 5 giây đầu tiên của transcript
-#             first_segment_text = segments[0]['text']
-#             print(f"TRANSCRIPT (start): '{first_segment_text[:100]}...'")
-#         print("="*50)
-
-
-# if __name__ == "__main__":
-#     # Để chạy mã async, chúng ta cần `asyncio.run()`
-#     asyncio.run(main())

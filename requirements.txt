@@ -45,8 +45,9 @@ ipython==8.18.1
 jupyter==1.0.0
 
 # Video Processing
-openai-whisper==20231117
-yt-dlp==2023.12.30
-moviepy==1.0.3
+openai-whisper
+yt-dlp
+youtube-transcript-api
+moviepy
 torch
 torchaudio

@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import asyncio
 from typing import List, Dict
-
+from datetime import datetime, timezone
 # Configuration
 from src.config import get_config
 
@@ -114,33 +114,80 @@ class MultimodalRAGSystem:
         return {'status': 'success', 'source_id': str(source_id)}
 
     async def _ingest_youtube(self, youtube_url: str):
-        """Ingest a YouTube video"""
+        """Ingest YouTube video - unified with pipeline"""
         logger.info(f"Ingesting YouTube: {youtube_url}")
-        transcripts = await self.video_extractor.extract_from_sources([youtube_url])
-        transcript_data = transcripts.get(youtube_url, [])
         
-        if not transcript_data:
-            return {'status': 'failed', 'error': 'No transcript extracted'}
+        try:
+            source_id = await self.pipeline.process_document_async(
+                youtube_url,  # file_path can be URL for youtube
+                source_type='youtube',
+                source_uri=youtube_url,
+                video_extractor=self.video_extractor  # Pass extractor to pipeline
+            )
+            
+            # Get saved KU count
+            source_doc = self.pipeline.db.get_source(source_id)
+            total_kus = source_doc.get('total_kus', 0) if source_doc else 0
+            
+            return {
+                'status': 'success',
+                'source_id': str(source_id),
+                'transcript_chunks': total_kus
+            }
         
-        return {'status': 'success', 'transcript_chunks': len(transcript_data)}
+        except Exception as e:
+            logger.error(f"YouTube ingestion failed: {e}", exc_info=True)
+            return {'status': 'failed', 'error': str(e)}
 
     async def _ingest_video(self, video_path: str):
-        """Ingest a local video file"""
+        """Ingest local video file - unified with pipeline"""
         logger.info(f"Ingesting video: {video_path}")
-        transcripts = await self.video_extractor.extract_from_sources([video_path])
-        transcript_data = transcripts.get(video_path, [])
-        return {'status': 'success', 'transcript_chunks': len(transcript_data)}
+        
+        try:
+            source_id = await self.pipeline.process_document_async(
+                video_path,
+                source_type='video',
+                source_uri=video_path,
+                video_extractor=self.video_extractor
+            )
+            
+            source_doc = self.pipeline.db.get_source(source_id)
+            total_kus = source_doc.get('total_kus', 0) if source_doc else 0
+            
+            return {
+                'status': 'success',
+                'source_id': str(source_id),
+                'transcript_chunks': total_kus
+            }
+        
+        except Exception as e:
+            logger.error(f"Video ingestion failed: {e}", exc_info=True)
+            return {'status': 'failed', 'error': str(e)}
 
     async def _ingest_website(self, url: str):
-        """Ingest website content"""
+        """Ingest website content - unified with pipeline"""
         logger.info(f"Ingesting website: {url}")
-        extracted = await self.website_extractor.extract_from_urls([url])
-        content = extracted.get(url)
         
-        if not content:
-            return {'status': 'failed', 'error': 'No content extracted'}
+        try:
+            source_id = await self.pipeline.process_document_async(
+                url,  # file_path can be URL for website
+                source_type='website',
+                source_uri=url,
+                website_extractor=self.website_extractor
+            )
+            
+            source_doc = self.pipeline.db.get_source(source_id)
+            total_kus = source_doc.get('total_kus', 0) if source_doc else 0
+            
+            return {
+                'status': 'success',
+                'source_id': str(source_id),
+                'chunks_created': total_kus
+            }
         
-        return {'status': 'success', 'content_length': len(content)}
+        except Exception as e:
+            logger.error(f"Website ingestion failed: {e}", exc_info=True)
+            return {'status': 'failed', 'error': str(e)}
 
     async def _ingest_image(self, image_path: str):
         """Ingest a standalone image"""
@@ -267,7 +314,7 @@ async def initialize_system() -> MultimodalRAGSystem:
     # Pipeline and query engine
     pipeline = OptimizedPipeline(
         mongo_handler=mongo_handler,
-        llm_client=GeminiClient,
+        llm_client=gemini_client, 
         content_embedder=content_embedder,
         max_workers=config.processing.max_workers,
         batch_size=config.processing.batch_size
