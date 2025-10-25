@@ -1,9 +1,14 @@
 """
 src/extraction/utils.py
 """
+import os, tempfile
+os.environ["FVCORE_CACHE"] = os.path.join(tempfile.gettempdir(), "fvcore_cache")
+ 
+import io
 import requests
 import trafilatura
-
+import os
+import sys
 import whisper
 import yt_dlp
 from moviepy.editor import VideoFileClip
@@ -12,7 +17,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 import fitz
 import pdfplumber
-import camelot
+# import camelot
 import pandas as pd
 import re
 import logging
@@ -151,137 +156,297 @@ class TableStructureReconstructor:
 
 
 class PDFUtils:
-    """FIXED: Improved text extraction and image handling"""
+    """PDF utilities with complete Windows LayoutParser fix"""
     
     _layout_model = None
+    _init_attempted = False
+
+    @staticmethod
+    def _sanitize_windows_path(path_str: str) -> str:
+        """
+        Sanitize path by removing Windows-illegal characters
+        Fixes: 'config.yml?dl=1.lock' → 'config_dl1.lock'
+        """
+        # Remove/replace illegal Windows filename characters
+        illegal_chars = ['?', '<', '>', ':', '"', '|', '*']
+        sanitized = path_str
+        
+        for char in illegal_chars:
+            sanitized = sanitized.replace(char, '_')
+        
+        # Also handle URL query strings
+        if '?' in sanitized or '&' in sanitized:
+            sanitized = re.sub(r'[?&=]', '_', sanitized)
+        
+        return sanitized
+
+    @staticmethod
+    def _patch_fvcore_cache():
+        """
+        Monkey-patch fvcore's PathManager to handle Windows paths
+        This fixes the 'Invalid argument' error on Windows
+        """
+        try:
+            from fvcore.common.file_io import PathManager
+            from iopath.common.file_io import HTTPURLHandler
+            
+            # Store original _get_local_path
+            original_get_local_path = HTTPURLHandler._get_local_path
+            
+            def patched_get_local_path(self, path, **kwargs):
+                """Patched version that sanitizes paths for Windows"""
+                local_path = original_get_local_path(self, path, **kwargs)
+                
+                if sys.platform == "win32" and local_path:
+                    # Sanitize the path
+                    parts = list(Path(local_path).parts)
+                    sanitized_parts = [PDFUtils._sanitize_windows_path(p) for p in parts]
+                    local_path = str(Path(*sanitized_parts))
+                
+                return local_path
+            
+            # Apply patch
+            HTTPURLHandler._get_local_path = patched_get_local_path
+            logger.info(" Applied fvcore Windows path patch")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Could not patch fvcore: {e}")
+            return False
 
     @staticmethod
     def initialize_layoutparser_model():
-        """Pre-load model - với error handling tốt hơn"""
+        """
+        Initialize LayoutParser with complete Windows fix
+        """
         global LAYOUTPARSER_AVAILABLE
-        if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
-            return
+        
+        if not LAYOUTPARSER_AVAILABLE:
+            logger.warning("LayoutParser module not available")
+            return False
+        
+        if PDFUtils._layout_model:
+            logger.info("LayoutParser model already loaded")
+            return True
+        
+        if PDFUtils._init_attempted:
+            logger.warning("LayoutParser initialization already failed")
+            return False
+        
+        PDFUtils._init_attempted = True
+        
         try:
             logger.info(" Initializing LayoutParser model...")
-            # This model requires Detectron2
-            PDFUtils._layout_model = lp.Detectron2LayoutModel(
-                'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
-                extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
-                label_map={0: "Text", 1: "Title", 2: "List", 3: "Table", 4: "Figure"}
-            )
-            logger.info("✓ LayoutParser model loaded successfully")
+            
+            # Check detectron2
+            try:
+                import detectron2
+                logger.info("✅ Detectron2 available")
+            except ImportError:
+                logger.error(" Detectron2 not found!")
+                logger.error("Install: pip install 'git+https://github.com/facebookresearch/detectron2.git'")
+                LAYOUTPARSER_AVAILABLE = False
+                return False
+            
+            # Windows-specific fixes
+            if sys.platform == "win32":
+                logger.info("   Windows detected - Applying fixes...")
+                
+                # Fix 1: Set simple cache directory
+                cache_dir = Path.home() / ".layoutparser_cache"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Fix 2: Override torch cache locations
+                torch_cache = cache_dir / "torch"
+                torch_cache.mkdir(exist_ok=True)
+                
+                os.environ['TORCH_HOME'] = str(torch_cache)
+                os.environ['FVCORE_CACHE'] = str(cache_dir / "fvcore")
+                
+                # Fix 3: Patch fvcore to handle URL query strings
+                PDFUtils._patch_fvcore_cache()
+                
+                logger.info(f"   Cache directory: {cache_dir}")
+            
+            # Initialize model with timeout
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Model initialization timeout")
+            
+            # Only set alarm on Unix systems (Windows doesn't support SIGALRM)
+            if hasattr(signal, 'SIGALRM'):
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(120)  # 2 minutes timeout
+            
+            try:
+                logger.info("   Downloading model (first time only)...")
+                PDFUtils._layout_model = lp.Detectron2LayoutModel(
+                    'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
+                    extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
+                    label_map={
+                        0: "Text", 
+                        1: "Title", 
+                        2: "List", 
+                        3: "Table", 
+                        4: "Figure"
+                    }
+                )
+                
+                if hasattr(signal, 'SIGALRM'):
+                    signal.alarm(0)  # Cancel timeout
+                
+                logger.info(" LayoutParser model loaded successfully")
+                return True
+                
+            except TimeoutError:
+                if hasattr(signal, 'SIGALRM'):
+                    signal.alarm(0)
+                logger.error(" Model initialization timeout (>2min)")
+                raise
+            
         except Exception as e:
-            logger.warning(f"LayoutParser initialization failed: {e}")
+            logger.error(f" LayoutParser initialization failed: {type(e).__name__}: {e}")
+            logger.error(f"   Error details: {str(e)}")
+            
+            # Provide helpful error messages
+            if "Invalid argument" in str(e):
+                logger.error("   → This is a Windows path issue with fvcore")
+                logger.error("   → Workaround: Set USE_LAYOUTPARSER=false in .env")
+            elif "connection" in str(e).lower() or "download" in str(e).lower():
+                logger.error("   → Model download failed (network issue)")
+                logger.error("   → Try again with better internet connection")
+            else:
+                logger.error("   → Unknown error, disabling LayoutParser")
+            
             logger.warning("Falling back to basic extraction without layout detection")
             LAYOUTPARSER_AVAILABLE = False
+            return False
 
+    @staticmethod
+    def detect_layout_regions(page):
+        """Detect layout regions using LayoutParser"""
+        if not LAYOUTPARSER_AVAILABLE or not PDFUtils._layout_model:
+            return None
+        
+        try:
+            # Convert page to image
+            pix = page.get_pixmap(dpi=150)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # Detect layout
+            layout = PDFUtils._layout_model.detect(img)
+            
+            # Organize by type
+            regions = {
+                'text': [],
+                'tables': [],
+                'figures': []
+            }
+            
+            for block in layout:
+                label = block.type.lower()
+                bbox = [block.block.x_1, block.block.y_1, 
+                       block.block.x_2, block.block.y_2]
+                
+                if label in ['text', 'title', 'list']:
+                    regions['text'].append(bbox)
+                elif label == 'table':
+                    regions['tables'].append(bbox)
+                elif label == 'figure':
+                    regions['figures'].append(bbox)
+            
+            logger.info(f"Detected: {len(regions['text'])} text, "
+                       f"{len(regions['tables'])} tables, "
+                       f"{len(regions['figures'])} figures")
+            
+            return regions
+            
+        except Exception as e:
+            logger.error(f"Layout detection failed: {e}")
+            return None
+        
     @staticmethod
     def extract_all_text_optimized(page: fitz.Page, min_length: int = 50) -> str:
         """
-        FIXED: Extract ALL text from page first, then chunk later
-        Tránh text blocks bị rời rạc
+        FIXED: Extract ALL text from page
+        Returns full page text as single string
         """
         try:
             # Method 1: Get all text as single string
             full_text = page.get_text("text")
             
-            if len(full_text.strip()) < min_length:
-                # Fallback: Try blocks method
-                blocks = page.get_text("dict")["blocks"]
-                text_parts = []
-                for block in blocks:
-                    if block.get("type") == 0:  # Text block
-                        for line in block.get("lines", []):
-                            for span in line.get("spans", []):
-                                text_parts.append(span.get("text", ""))
-                full_text = " ".join(text_parts)
+            # DEBUG: Log what we got
+            logger.debug(f"Page {page.number + 1}: Extracted {len(full_text)} chars")
+            
+            if len(full_text.strip()) >= min_length:
+                return full_text.strip()
+            
+            # Fallback: Try blocks method if text is too short
+            logger.debug(f"Page {page.number + 1}: Text too short, trying blocks method")
+            blocks = page.get_text("dict")["blocks"]
+            text_parts = []
+            
+            for block in blocks:
+                if block.get("type") == 0:  # Text block
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            text_parts.append(span.get("text", ""))
+            
+            full_text = " ".join(text_parts)
+            logger.debug(f"Page {page.number + 1}: Blocks method got {len(full_text)} chars")
             
             return full_text.strip()
         
         except Exception as e:
-            logger.error(f"Failed to extract text: {e}")
+            logger.error(f"Failed to extract text from page {page.number + 1}: {e}")
             return ""
 
     @staticmethod
-    def _bbox_overlaps(bbox1: List[float], bbox2: List[float], threshold: float = 0.5) -> bool:
-        """Check if two bboxes overlap significantly"""
-        if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
-            return False
-        
-        x1_min, y1_min, x1_max, y1_max = bbox1[:4]
-        x2_min, y2_min, x2_max, y2_max = bbox2[:4]
-        
-        x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
-        y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
-        intersection = x_overlap * y_overlap
-        
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        union = area1 + area2 - intersection
-        
-        iou = intersection / union if union > 0 else 0
-        return iou >= threshold
-        """Check if two bboxes overlap significantly"""
-        if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
-            return False
-        
-        x1_min, y1_min, x1_max, y1_max = bbox1[:4]
-        x2_min, y2_min, x2_max, y2_max = bbox2[:4]
-        
-        x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
-        y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
-        intersection = x_overlap * y_overlap
-        
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        union = area1 + area2 - intersection
-        
-        iou = intersection / union if union > 0 else 0
-        return iou >= threshold
-
     @staticmethod
-    def _bbox_overlaps_any(bbox: List[float], regions: List[List[float]], threshold: float = 0.3) -> bool:
-        """Check if bbox overlaps with any region in list"""
-        return any(PDFUtils._bbox_overlaps(bbox, region, threshold) for region in regions)
-
-    @staticmethod
-    def extract_text_with_layout(page: fitz.Page, page_num: int, min_length: int, 
-                                 layout_blocks: Dict) -> List[Dict]:
-        """Extract text blocks, avoiding table/figure regions"""
-        text_objects = []
-        avoid_regions = layout_blocks.get('tables', []) + layout_blocks.get('figures', [])
-        
-        logger.debug(f"Extracting text with layout awareness "
-                    f"(avoiding {len(avoid_regions)} table/figure regions)...")
-        
-        extracted_count = 0
-        skipped_count = 0
+    def extract_images_improved(
+        page: fitz.Page, 
+        page_num: int, 
+        min_width: int = 100,
+        min_height: int = 100,
+        min_pixels: int = 10000
+    ) -> List[Dict]:
+        """Extract images with size filtering"""
+        image_objects = []
         
         try:
-            blocks = page.get_text("dict")["blocks"]
-            for block in blocks:
-                if block.get("type") == 0:  # Text block
-                    bbox = block.get("bbox", [])
+            image_list = page.get_images(full=True)
+            logger.debug(f"Page {page_num + 1}: Found {len(image_list)} images")
+            
+            for img_idx, img in enumerate(image_list):
+                try:
+                    xref = img[0]
+                    base_image = page.parent.extract_image(xref)
                     
-                    # Skip if overlaps with table/figure
-                    if PDFUtils._bbox_overlaps_any(bbox, avoid_regions):
-                        skipped_count += 1
+                    if not base_image:
                         continue
                     
-                    # Get image data
-                    image_data = base_image.get("image")
+                    width = base_image.get("width", 0)
+                    height = base_image.get("height", 0)
                     
+                    # Size filtering
+                    if width < min_width or height < min_height:
+                        logger.debug(f"Skipping small image: {width}x{height}")
+                        continue
+                    
+                    if width * height < min_pixels:
+                        logger.debug(f"Skipping low-pixel image: {width*height} pixels")
+                        continue
+                    
+                    image_data = base_image.get("image")
                     if not image_data:
                         continue
                     
-                    # Try to load as PIL Image to verify
+                    # Verify image
                     try:
                         pil_image = Image.open(io.BytesIO(image_data))
-                        
-                        # Check if not tiny
                         if pil_image.width < min_width or pil_image.height < min_height:
                             continue
-                        
                     except Exception as e:
                         logger.warning(f"Could not verify image {img_idx}: {e}")
                         continue
@@ -307,7 +472,7 @@ class PDFUtils:
         except Exception as e:
             logger.error(f"Image extraction failed on page {page_num+1}: {e}")
         
-        logger.info(f"Extracted {len(image_objects)} valid images from page {page_num+1}")
+        logger.info(f"Page {page_num + 1}: Extracted {len(image_objects)} valid images")
         return image_objects
 
     @staticmethod
@@ -316,26 +481,26 @@ class PDFUtils:
         table_objects = []
         
         # Try Camelot first
-        try:
-            tables = camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='lattice')
-            if not tables or (tables and tables[0].accuracy < 60):
-                tables.extend(camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='stream', edge_tol=100))
+        # try:
+            # tables = camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='lattice')
+            # if not tables or (tables and tables[0].accuracy < 60):
+            #     tables.extend(camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='stream', edge_tol=100))
             
-            for idx, table in enumerate(tables):
-                if table.accuracy > 50:
-                    processed = TableStructureReconstructor.process_table(table.df)
-                    if processed:
-                        table_objects.append({
-                            "type": "table",
-                            "page": page_num + 1,
-                            "bbox": list(table._bbox) if hasattr(table, '_bbox') else [],
-                            "table_id": f"table_{page_num+1}_{idx+1}",
-                            **processed,
-                            "extraction_method": f"camelot_{table.flavor}",
-                            "accuracy": table.accuracy
-                        })
-        except Exception as e:
-            logger.warning(f"Camelot failed: {e}")
+        #     for idx, table in enumerate(tables):
+        #         if table.accuracy > 50:
+        #             processed = TableStructureReconstructor.process_table(table.df)
+        #             if processed:
+        #                 table_objects.append({
+        #                     "type": "table",
+        #                     "page": page_num + 1,
+        #                     "bbox": list(table._bbox) if hasattr(table, '_bbox') else [],
+        #                     "table_id": f"table_{page_num+1}_{idx+1}",
+        #                     **processed,
+        #                     "extraction_method": f"camelot_{table.flavor}",
+        #                     "accuracy": table.accuracy
+        #                 })
+        # except Exception as e:
+        #     logger.warning(f"Camelot failed: {e}")
 
         # Fallback to pdfplumber
         if not table_objects:
@@ -360,17 +525,23 @@ class PDFUtils:
         return table_objects
 
     @staticmethod
-    def extract_text_blocks(page: fitz.Page, page_num: int, min_length: int = 50) -> List[Dict]:
+    def extract_text_blocks(
+        page: fitz.Page, 
+        page_num: int, 
+        min_length: int = 50
+    ) -> List[Dict]:
         """
-        DEPRECATED: Use extract_all_text_optimized instead
-        Keeping for backward compatibility
+        FIXED: Return text as single block (will be chunked later)
         """
-        full_text = PDFUtils.extract_all_text_optimized(page, min_length)
+        full_text = PDFUtils.extract_all_text_optimized(page, min_length=10)  # Lower threshold
         
-        if not full_text:
+        if not full_text or len(full_text) < min_length:
+            logger.warning(f"Page {page_num + 1}: No text extracted (got {len(full_text)} chars)")
             return []
         
-        # Return as single chunk (will be chunked later by embedder)
+        logger.info(f"Page {page_num + 1}: Extracted {len(full_text)} chars of text")
+        
+        # Return as single chunk (will be split by embedder later)
         return [{
             "type": "text_chunk",
             "text": full_text,

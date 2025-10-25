@@ -13,15 +13,19 @@ motor==3.3.2
 # ===============================
 # Embeddings and AI Models
 # ===============================
-voyageai==0.2.3
-google-generativeai==0.3.2
+voyageai==0.8.6
+google-generativeai==0.3.3
 
 # ===============================
 # PDF, Image, and Layout Processing
 # ===============================
 PyMuPDF==1.23.8
 pdfplumber==0.10.3
-camelot-py[cv]
+
+# FIXED: Camelot with compatible PyPDF2
+# camelot-py[cv]  # Removed - has PyPDF2 compatibility issues
+pypdf==3.17.4  # Use newer pypdf instead
+
 opencv-python==4.8.1.78
 layoutparser
 iopath # Required by Detectron2

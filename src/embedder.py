@@ -5,7 +5,7 @@ FIXED: Voyage AI embedding với API chính xác
 from typing import Dict, Any, List, Optional
 import logging
 import pandas as pd
-from voyageai import Client
+import voyageai
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from PIL import Image
 import io
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class TextEmbedder:
     def __init__(self, api_key: str, model_name: str = "voyage-3"):
-        self.client = Client(api_key=api_key)
+        self.client = voyageai.Client(api_key=api_key)
         self.model_name = model_name
         logger.info(f"TextEmbedder initialized with Voyage AI model: {self.model_name}")
 
@@ -67,7 +67,7 @@ class MultimodalEmbedder:
     """Voyage Multimodal 3 embedder for figures and tables"""
 
     def __init__(self, api_key: str, model_name: str = "voyage-multimodal-3"):
-        self.client = Client(api_key=api_key)
+        self.client = voyageai.Client(api_key=api_key)
         self.model_name = model_name
         logger.info(f"MultimodalEmbedder initialized with model: {self.model_name}")
 
