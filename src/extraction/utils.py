@@ -45,9 +45,7 @@ class TableStructureReconstructor:
 
     @staticmethod
     def detect_header_rows(df: pd.DataFrame, max_header_rows: int = 5) -> int:
-        """
-        Detect how many rows are headers (not data)
-        """
+        """Detect how many rows are headers (not data)"""
         if len(df) < 2:
             return 1
 
@@ -144,7 +142,8 @@ class TableStructureReconstructor:
             return None
         
         return {
-            "headers": column_names, "rows": data_df.values.tolist(),
+            "headers": column_names,
+            "rows": data_df.values.tolist(),
             "data": data_df.to_dict(orient='records'),
             "shape": {"rows": len(data_df), "columns": len(data_df.columns)},
             "metadata": {"header_rows_detected": header_rows, "has_hierarchical_headers": header_rows > 1}
@@ -152,17 +151,18 @@ class TableStructureReconstructor:
 
 
 class PDFUtils:
+    """FIXED: Improved text extraction and image handling"""
+    
     _layout_model = None
 
     @staticmethod
     def initialize_layoutparser_model():
-        """Pre-load model and handle initialization errors gracefully."""
+        """Pre-load model - với error handling tốt hơn"""
         global LAYOUTPARSER_AVAILABLE
         if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
             return
         try:
             logger.info("🔧 Initializing LayoutParser model...")
-            # This model requires Detectron2
             PDFUtils._layout_model = lp.Detectron2LayoutModel(
                 'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
                 extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
@@ -170,211 +170,149 @@ class PDFUtils:
             )
             logger.info("✓ LayoutParser model loaded successfully")
         except Exception as e:
-            logger.warning(f"LayoutParser model initialization failed: {e}")
-            logger.warning("This is likely because 'Detectron2' is not installed. Please install it.")
+            logger.warning(f"LayoutParser initialization failed: {e}")
+            logger.warning("Falling back to basic extraction without layout detection")
             LAYOUTPARSER_AVAILABLE = False
 
     @staticmethod
-    def detect_layout_regions(page: fitz.Page) -> Optional[Dict[str, List]]:
-        """Use LayoutParser to detect table and figure regions on a page"""
-        if not LAYOUTPARSER_AVAILABLE:
-            return None
-        
-        if not PDFUtils._layout_model:
-            PDFUtils.initialize_layoutparser_model()
-            if not PDFUtils._layout_model:
-                return None
-
+    def extract_all_text_optimized(page: fitz.Page, min_length: int = 50) -> str:
+        """
+        FIXED: Extract ALL text from page first, then chunk later
+        Tránh text blocks bị rời rạc
+        """
         try:
-            pix = page.get_pixmap(dpi=150)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            layout = PDFUtils._layout_model.detect(img)
+            # Method 1: Get all text as single string
+            full_text = page.get_text("text")
             
-            regions = {'tables': [], 'figures': [], 'text': []}
-            for block in layout:
-                bbox = [block.block.x_1, block.block.y_1, block.block.x_2, block.block.y_2]
-                if block.type == "Table": regions['tables'].append(bbox)
-                elif block.type == "Figure": regions['figures'].append(bbox)
-                elif block.type in ["Text", "Title", "List"]: regions['text'].append(bbox)
-            return regions
+            if len(full_text.strip()) < min_length:
+                # Fallback: Try blocks method
+                blocks = page.get_text("dict")["blocks"]
+                text_parts = []
+                for block in blocks:
+                    if block.get("type") == 0:  # Text block
+                        for line in block.get("lines", []):
+                            for span in line.get("spans", []):
+                                text_parts.append(span.get("text", ""))
+                full_text = " ".join(text_parts)
+            
+            return full_text.strip()
+        
         except Exception as e:
-            logger.warning(f"LayoutParser detection error on page {page.number + 1}: {e}")
-            return None
+            logger.error(f"Failed to extract text: {e}")
+            return ""
 
     @staticmethod
-    def _bbox_overlaps(bbox1: List[float], bbox2: List[float], threshold: float = 0.5) -> bool:
-        """Check if two bboxes overlap significantly"""
-        if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
-            return False
-        
-        x1_min, y1_min, x1_max, y1_max = bbox1[:4]
-        x2_min, y2_min, x2_max, y2_max = bbox2[:4]
-        
-        x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
-        y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
-        intersection = x_overlap * y_overlap
-        
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        union = area1 + area2 - intersection
-        
-        iou = intersection / union if union > 0 else 0
-        return iou >= threshold
-        """Check if two bboxes overlap significantly"""
-        if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
-            return False
-        
-        x1_min, y1_min, x1_max, y1_max = bbox1[:4]
-        x2_min, y2_min, x2_max, y2_max = bbox2[:4]
-        
-        x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
-        y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
-        intersection = x_overlap * y_overlap
-        
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        union = area1 + area2 - intersection
-        
-        iou = intersection / union if union > 0 else 0
-        return iou >= threshold
-
-    @staticmethod
-    def _bbox_overlaps_any(bbox: List[float], regions: List[List[float]], threshold: float = 0.3) -> bool:
-        """Check if bbox overlaps with any region in list"""
-        return any(PDFUtils._bbox_overlaps(bbox, region, threshold) for region in regions)
-
-    @staticmethod
-    def extract_text_with_layout(page: fitz.Page, page_num: int, min_length: int, 
-                                 layout_blocks: Dict) -> List[Dict]:
-        """Extract text blocks, avoiding table/figure regions"""
-        text_objects = []
-        avoid_regions = layout_blocks.get('tables', []) + layout_blocks.get('figures', [])
-        
-        logger.debug(f"Extracting text with layout awareness "
-                    f"(avoiding {len(avoid_regions)} table/figure regions)...")
-        
-        extracted_count = 0
-        skipped_count = 0
+    def extract_images_improved(
+        page: fitz.Page, 
+        page_num: int, 
+        min_width: int = 100,
+        min_height: int = 100,
+        min_pixels: int = 10000
+    ) -> List[Dict]:
+        """
+        FIXED: Better image extraction with size filtering
+        Giống như notebook Colab của bạn
+        """
+        image_objects = []
         
         try:
-            blocks = page.get_text("dict")["blocks"]
-            for block in blocks:
-                if block.get("type") == 0:  # Text block
-                    bbox = block.get("bbox", [])
+            # Get all images from page
+            image_list = page.get_images(full=True)
+            
+            logger.debug(f"Found {len(image_list)} images on page {page_num + 1}")
+            
+            for img_idx, img in enumerate(image_list):
+                try:
+                    xref = img[0]
                     
-                    # Skip if overlaps with table/figure
-                    if PDFUtils._bbox_overlaps_any(bbox, avoid_regions):
-                        skipped_count += 1
+                    # Extract image
+                    base_image = page.parent.extract_image(xref)
+                    
+                    if not base_image:
                         continue
                     
-                    text = " ".join(
-                        span.get("text", "") 
-                        for line in block.get("lines", []) 
-                        for span in line.get("spans", [])
-                    ).strip()
+                    width = base_image.get("width", 0)
+                    height = base_image.get("height", 0)
                     
-                    if len(text) >= min_length:
-                        text_objects.append({
-                            "type": "text_chunk", 
-                            "text": text, 
-                            "page": page_num + 1,
-                            "bbox": list(bbox), 
-                            "detected_by": "layoutparser"
-                        })
-                        extracted_count += 1
-        except Exception as e:
-            logger.warning(f" Failed to extract text with layout on page {page_num+1}: {e}")
+                    # Size filtering
+                    if width < min_width or height < min_height:
+                        logger.debug(f"Skipping small image: {width}x{height}")
+                        continue
+                    
+                    if width * height < min_pixels:
+                        logger.debug(f"Skipping low-pixel image: {width*height} pixels")
+                        continue
+                    
+                    # Get image data
+                    image_data = base_image.get("image")
+                    
+                    if not image_data:
+                        continue
+                    
+                    # Try to load as PIL Image to verify
+                    try:
+                        pil_image = Image.open(io.BytesIO(image_data))
+                        
+                        # Check if not tiny
+                        if pil_image.width < min_width or pil_image.height < min_height:
+                            continue
+                        
+                    except Exception as e:
+                        logger.warning(f"Could not verify image {img_idx}: {e}")
+                        continue
+                    
+                    # Create figure object
+                    figure = {
+                        "type": "figure",
+                        "image_data": image_data,
+                        "page": page_num + 1,
+                        "width": width,
+                        "height": height,
+                        "figure_id": f"page{page_num+1}_fig{img_idx+1}",
+                        "xref": xref
+                    }
+                    
+                    image_objects.append(figure)
+                    logger.debug(f"✓ Extracted image {img_idx+1}: {width}x{height}px")
+                
+                except Exception as e:
+                    logger.warning(f"Failed to extract image {img_idx+1}: {e}")
+                    continue
         
-        logger.debug(f"  ✓ Extracted {extracted_count} text blocks, skipped {skipped_count} overlapping regions")
-        return text_objects
-
-    @staticmethod
-    def extract_table_from_bbox(page: fitz.Page, page_num: int, pdf_path: str, bbox: List[float]) -> List[Dict]:
-        """Extract table from specific bbox detected by LayoutParser"""
-        logger.debug(f"    Extracting table from detected bbox...")
-        try:
-            tables = PDFUtils.extract_tables(page, page_num, pdf_path=pdf_path, use_layoutparser=False)
-            result = []
-            
-            for table in tables:
-                if PDFUtils._bbox_overlaps(table.get('bbox', []), bbox):
-                    table['detected_by'] = 'layoutparser'
-                    table['detection_bbox'] = bbox
-                    result.append(table)
-                    logger.debug(f" Matched table in detected region")
-            
-            if not result:
-                logger.debug(f" No tables matched the detected bbox")
-            
-            return result
         except Exception as e:
-            logger.warning(f"    Failed to extract table from bbox: {e}")
-            return []
-
-    @staticmethod
-    def extract_figure_from_bbox(page: fitz.Page, page_num: int, bbox: List[float]) -> List[Dict]:
-        """Extract figure image from specific bbox detected by LayoutParser"""
-        logger.debug(f"    Extracting figure from detected bbox...")
-        try:
-            x0, y0, x1, y1 = bbox
-            clip_rect = fitz.Rect(
-                max(0, x0 - 10), 
-                max(0, y0 - 10), 
-                min(page.rect.width, x1 + 10), 
-                min(page.rect.height, y1 + 10)
-            )
-            pix = page.get_pixmap(clip=clip_rect, dpi=200)
-            
-            figure = {
-                "type": "figure", 
-                "image_data": pix.tobytes(), 
-                "page": page_num + 1,
-                "width": pix.width, 
-                "height": pix.height, 
-                "bbox": bbox,
-                "figure_id": f"page{page_num+1}_fig_lp", 
-                "detected_by": "layoutparser"
-            }
-            
-            logger.debug(f"      ✓ Extracted figure: {pix.width}x{pix.height}px from LayoutParser region")
-            return [figure]
-            
-        except Exception as e:
-            logger.warning(f"    Failed to extract figure from bbox: {e}")
-            return []
+            logger.error(f"Image extraction failed on page {page_num+1}: {e}")
         
-    @staticmethod
-    def extract_images(page: fitz.Page, page_num: int, min_pixels: int = 10000) -> List[Dict]:
-        """Extract images with size filtering and logging"""
-        image_objects = []
-        for img_idx, img in enumerate(page.get_images(full=True)):
-            try:
-                xref = img[0]
-                base_image = page.parent.extract_image(xref)
-                width, height = base_image.get("width", 0), base_image.get("height", 0)
-                if width * height >= min_pixels:
-                    image_objects.append({"type": "figure", "image_data": base_image["image"], "page": page_num + 1, "width": width, "height": height, "figure_id": f"page{page_num+1}_fig{img_idx+1}"})
-            except Exception as e:
-                logger.warning(f"Failed to extract image {img_idx+1}: {e}")
+        logger.info(f"Extracted {len(image_objects)} valid images from page {page_num+1}")
         return image_objects
 
     @staticmethod
     def _extract_tables_advanced(page: fitz.Page, page_num: int, pdf_path: str) -> List[Dict]:
-        """Advanced table extraction using Camelot and pdfplumber"""
+        """Advanced table extraction using multiple methods"""
         table_objects = []
+        
+        # Try Camelot first
         try:
             tables = camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='lattice')
-            if not tables or tables[0].accuracy < 60:
+            if not tables or (tables and tables[0].accuracy < 60):
                 tables.extend(camelot.read_pdf(pdf_path, pages=str(page_num + 1), flavor='stream', edge_tol=100))
+            
             for idx, table in enumerate(tables):
                 if table.accuracy > 50:
                     processed = TableStructureReconstructor.process_table(table.df)
                     if processed:
-                        table_objects.append({"type": "table", "page": page_num + 1, "bbox": list(table._bbox) if hasattr(table, '_bbox') else [], "table_id": f"table_{page_num+1}_{idx+1}", **processed, "extraction_method": f"camelot_{table.flavor}", "accuracy": table.accuracy})
+                        table_objects.append({
+                            "type": "table",
+                            "page": page_num + 1,
+                            "bbox": list(table._bbox) if hasattr(table, '_bbox') else [],
+                            "table_id": f"table_{page_num+1}_{idx+1}",
+                            **processed,
+                            "extraction_method": f"camelot_{table.flavor}",
+                            "accuracy": table.accuracy
+                        })
         except Exception as e:
-            if "Ghostscript" not in str(e): # Avoid redundant logging if Ghostscript is the known issue
-                logger.warning(f"Camelot extraction failed on page {page_num+1}: {e}")
+            logger.warning(f"Camelot failed: {e}")
 
+        # Fallback to pdfplumber
         if not table_objects:
             try:
                 with pdfplumber.open(pdf_path) as pdf:
@@ -383,76 +321,53 @@ class PDFUtils:
                         if raw_table and len(raw_table) > 1:
                             processed = TableStructureReconstructor.process_table(pd.DataFrame(raw_table))
                             if processed:
-                                table_objects.append({"type": "table", "page": page_num + 1, "bbox": [], "table_id": f"table_{page_num+1}_{idx+1}", **processed, "extraction_method": "pdfplumber"})
+                                table_objects.append({
+                                    "type": "table",
+                                    "page": page_num + 1,
+                                    "bbox": [],
+                                    "table_id": f"table_{page_num+1}_{idx+1}",
+                                    **processed,
+                                    "extraction_method": "pdfplumber"
+                                })
             except Exception as e:
-                logger.warning(f"pdfplumber extraction failed on page {page_num+1}: {e}")
+                logger.warning(f"pdfplumber failed: {e}")
         
         return table_objects
-    
-    # ----- Public method ----- #
+
     @staticmethod
     def extract_text_blocks(page: fitz.Page, page_num: int, min_length: int = 50) -> List[Dict]:
-        """Extract text blocks with position info and logging"""
-        text_objects = []
-        logger.debug(f"Extracting text blocks from page {page_num + 1}...")
+        """
+        DEPRECATED: Use extract_all_text_optimized instead
+        Keeping for backward compatibility
+        """
+        full_text = PDFUtils.extract_all_text_optimized(page, min_length)
         
-        try:
-            blocks = page.get_text("dict")["blocks"]
-            text_count = 0
-            
-            for block in blocks:
-                if block.get("type") == 0:  # Text block
-                    text_lines = []
-                    for line in block.get("lines", []):
-                        for span in line.get("spans", []):
-                            text_lines.append(span.get("text", ""))
-                    text = " ".join(text_lines).strip()
-                    
-                    if len(text) >= min_length:
-                        text_objects.append({
-                            "type": "text_chunk",
-                            "text": text,
-                            "page": page_num + 1,
-                            "bbox": list(block.get("bbox", []))
-                        })
-                        text_count += 1
-            
-            logger.debug(f"  ✓ Extracted {text_count} text blocks (≥{min_length} chars)")
-            
-        except Exception as e:
-            logger.error(f" Failed to extract text on page {page_num+1}: {e}")
+        if not full_text:
+            return []
         
-        return text_objects
+        # Return as single chunk (will be chunked later by embedder)
+        return [{
+            "type": "text_chunk",
+            "text": full_text,
+            "page": page_num + 1,
+            "bbox": list(page.rect)
+        }]
 
     @staticmethod
     def extract_images(page: fitz.Page, page_num: int, min_pixels: int = 10000) -> List[Dict]:
-        """Extract images with size filtering and logging"""
-        image_objects = []
-        for img_idx, img in enumerate(page.get_images(full=True)):
-            try:
-                xref = img[0]
-                base_image = page.parent.extract_image(xref)
-                width, height = base_image.get("width", 0), base_image.get("height", 0)
-                if width * height >= min_pixels:
-                    image_objects.append({"type": "figure", "image_data": base_image["image"], "page": page_num + 1, "width": width, "height": height, "figure_id": f"page{page_num+1}_fig{img_idx+1}"})
-            except Exception as e:
-                logger.warning(f"Failed to extract image {img_idx+1}: {e}")
-        return image_objects
+        """Wrapper for improved image extraction"""
+        return PDFUtils.extract_images_improved(page, page_num, min_pixels=min_pixels)
 
     @staticmethod
     def extract_tables(page: fitz.Page, page_num: int, pdf_path: Optional[str] = None, 
                        use_layoutparser: bool = True) -> List[Dict]:
-        """Extract tables with corrected logic and fallbacks."""
+        """Extract tables with multiple fallback methods"""
         table_objects = []
-        logger.debug(f"Extracting tables from page {page_num + 1}...")
-
-        # Method 1: PyMuPDF built-in (Corrected)
-        logger.debug("  Trying PyMuPDF table extraction...")
+        
+        # Method 1: PyMuPDF built-in
         try:
-            # The find_tables() result is an iterable TableFinder object, not a list.
-            # We iterate over it. If no tables are found, the loop is just empty.
-            tables_found = list(page.find_tables()) # Convert to list to get count
-            logger.debug(f"  Found {len(tables_found)} potential tables with PyMuPDF")
+            tables_found = list(page.find_tables())
+            logger.debug(f"PyMuPDF found {len(tables_found)} tables")
 
             for idx, t in enumerate(tables_found):
                 try:
@@ -461,26 +376,26 @@ class PDFUtils:
                         processed = TableStructureReconstructor.process_table(df)
                         if processed:
                             table_objects.append({
-                                "type": "table", "page": page_num + 1, "bbox": list(t.bbox),
-                                "table_id": f"table_{page_num+1}_{idx+1}_pymupdf", 
-                                **processed, "extraction_method": "pymupdf",
+                                "type": "table",
+                                "page": page_num + 1,
+                                "bbox": list(t.bbox),
+                                "table_id": f"table_{page_num+1}_{idx+1}_pymupdf",
+                                **processed,
+                                "extraction_method": "pymupdf",
                                 "has_hierarchical_headers": processed["metadata"]["has_hierarchical_headers"]
                             })
                 except Exception as e:
-                    logger.warning(f"  Failed to process PyMuPDF table {idx+1}: {e}")
+                    logger.warning(f"Failed to process PyMuPDF table {idx+1}: {e}")
                     
         except Exception as e:
-            logger.warning(f"  PyMuPDF table extraction failed on page {page_num+1}: {e}")
+            logger.warning(f"PyMuPDF table extraction failed: {e}")
 
-        # Method 2: Fallback to advanced extraction (Camelot + pdfplumber)
+        # Method 2: Advanced extraction if needed
         if not table_objects and pdf_path:
-            logger.debug("  No tables found via PyMuPDF, trying advanced extraction (Camelot/pdfplumber)...")
             table_objects.extend(PDFUtils._extract_tables_advanced(page, page_num, pdf_path))
         
         if table_objects:
-            logger.info(f"  ✓ Extracted {len(table_objects)} tables from page {page_num+1}")
-        else:
-            logger.debug(f"  No tables found on page {page_num+1}")
+            logger.info(f"✓ Extracted {len(table_objects)} tables from page {page_num+1}")
         
         return table_objects
 

@@ -73,7 +73,7 @@ torchaudio
 # Optional: LayoutParser (Advanced PDF table/figure detection)
 # ===============================
 layoutparser
-layoutparser[paddledetection,torch]
+layoutparser[layoutmodels]
 
 # To install Detectron2 (used internally by LayoutParser for deep layout models):
 # Run manually (outside requirements.txt):

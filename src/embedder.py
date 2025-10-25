@@ -1,6 +1,6 @@
 """
-src/embedding/Embedder.py
-Enhanced embedder with Voyage Multimodal 3 for figures and tables
+src/embedder.py
+FIXED: Voyage AI embedding với API chính xác
 """
 from typing import Dict, Any, List, Optional
 import logging
@@ -20,6 +20,7 @@ class TextEmbedder:
         logger.info(f"TextEmbedder initialized with Voyage AI model: {self.model_name}")
 
     def embed_batch(self, texts: List[str], input_type: str = "document") -> List[List[float]]:
+        """Embed batch of texts - FIXED API call"""
         if not texts:
             return []
         try:
@@ -34,6 +35,7 @@ class TextEmbedder:
             return [[] for _ in texts]
 
     def embed(self, text: str, input_type: str = "document") -> List[float]:
+        """Embed single text"""
         results = self.embed_batch([text], input_type=input_type)
         return results[0] if results else []
 
@@ -43,6 +45,7 @@ class TextEmbedder:
         chunk_size: int = 1000, 
         chunk_overlap: int = 200
     ) -> List[Dict[str, Any]]:
+        """Chunk text and embed each chunk"""
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -76,13 +79,12 @@ class MultimodalEmbedder:
         return base64.b64encode(img_bytes).decode("utf-8")
 
     def embed_image(self, image: Image.Image) -> List[float]:
-        """Embed a single image using Voyage Multimodal 3"""
+        """Embed a single image - FIXED API call"""
         try:
             base64_image = self._image_to_base64(image)
-            result = self.client.embed(
+            result = self.client.multimodal_embed(
                 inputs=[[base64_image]],
-                model=self.model_name,
-                input_type="document"
+                model=self.model_name
             )
             return result.embeddings[0]
         except Exception as e:
@@ -93,10 +95,9 @@ class MultimodalEmbedder:
         """Embed multiple images in batch"""
         try:
             base64_images = [[self._image_to_base64(img)] for img in images]
-            result = self.client.embed(
+            result = self.client.multimodal_embed(
                 inputs=base64_images,
-                model=self.model_name,
-                input_type="document"
+                model=self.model_name
             )
             return result.embeddings
         except Exception as e:
@@ -110,7 +111,6 @@ class MultimodalEmbedder:
     ) -> List[float]:
         """
         Embed table using both visual and textual representation
-        Voyage Multimodal can handle both simultaneously
         """
         try:
             inputs = []
@@ -121,15 +121,16 @@ class MultimodalEmbedder:
                 base64_image = self._image_to_base64(table_image)
                 inputs = [[base64_image]]
             elif table_text:
-                inputs = [[table_text]]
+                # For text-only tables, use text embedder instead
+                logger.warning("Text-only table, switching to text embedding")
+                return []
             else:
                 logger.warning("No table content provided")
                 return []
 
-            result = self.client.embed(
+            result = self.client.multimodal_embed(
                 inputs=inputs,
-                model=self.model_name,
-                input_type="document"
+                model=self.model_name
             )
             return result.embeddings[0]
         except Exception as e:
@@ -157,14 +158,22 @@ class ContentEmbedder:
     ) -> Dict[str, Any]:
         """Create embedding for a figure using multimodal model"""
         text_description = f"Figure Caption: {caption}\n\nDetailed Analysis: {summary}"
+        
+        # Try multimodal embedding first
         vector = self.multimodal_embedder.embed_table_with_image(
             table_image=image,
             table_text=text_description
         )
+        
+        # Fallback to text embedding if multimodal fails
+        if not vector:
+            logger.warning("Multimodal embedding failed, falling back to text embedding")
+            vector = self.text_embedder.embed(text_description)
+        
         return {
             "vector": vector,
             "source_text": text_description,
-            "embedding_type": "multimodal"
+            "embedding_type": "multimodal" if vector else "text"
         }
 
     def embed_table(
@@ -174,7 +183,7 @@ class ContentEmbedder:
         summary: str = "",
         table_image: Optional[Image.Image] = None
     ) -> Dict[str, Any]:
-        """Create embedding for a table using multimodal model"""
+        """Create embedding for a table - FIXED to always use text embedding"""
         try:
             table_str = pd.DataFrame(table_data).to_markdown(index=False, tablefmt="pipe")
         except Exception as e:
@@ -187,15 +196,20 @@ class ContentEmbedder:
             f"Table Content:\n{table_str}"
         )
 
-        if table_image:
-            vector = self.multimodal_embedder.embed_table_with_image(
-                table_image=table_image,
-                table_text=combined_text
-            )
-            embedding_type = "multimodal"
-        else:
-            vector = self.text_embedder.embed(combined_text)
-            embedding_type = "text"
+        # FIXED: Always use text embedding for tables (more reliable)
+        vector = self.text_embedder.embed(combined_text)
+        embedding_type = "text"
+        
+        # Optional: Try multimodal if we have image
+        if table_image and not vector:
+            try:
+                vector = self.multimodal_embedder.embed_table_with_image(
+                    table_image=table_image,
+                    table_text=combined_text
+                )
+                embedding_type = "multimodal"
+            except Exception as e:
+                logger.warning(f"Multimodal table embedding failed: {e}")
 
         return {
             "vector": vector,
