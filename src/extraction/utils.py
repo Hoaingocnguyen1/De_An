@@ -161,7 +161,7 @@ class PDFUtils:
         if not LAYOUTPARSER_AVAILABLE or PDFUtils._layout_model:
             return
         try:
-            logger.info("🔧 Initializing LayoutParser model...")
+            logger.info(" Initializing LayoutParser model...")
             # This model requires Detectron2
             PDFUtils._layout_model = lp.Detectron2LayoutModel(
                 'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
@@ -203,23 +203,6 @@ class PDFUtils:
 
     @staticmethod
     def _bbox_overlaps(bbox1: List[float], bbox2: List[float], threshold: float = 0.5) -> bool:
-        """Check if two bboxes overlap significantly"""
-        if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
-            return False
-        
-        x1_min, y1_min, x1_max, y1_max = bbox1[:4]
-        x2_min, y2_min, x2_max, y2_max = bbox2[:4]
-        
-        x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
-        y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
-        intersection = x_overlap * y_overlap
-        
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        union = area1 + area2 - intersection
-        
-        iou = intersection / union if union > 0 else 0
-        return iou >= threshold
         """Check if two bboxes overlap significantly"""
         if not all([bbox1, bbox2, len(bbox1) >= 4, len(bbox2) >= 4]):
             return False

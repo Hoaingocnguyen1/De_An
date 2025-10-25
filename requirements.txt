@@ -15,16 +15,17 @@ motor==3.3.2
 # ===============================
 voyageai==0.2.3
 google-generativeai==0.3.2
-dashscope==1.14.1
 
 # ===============================
-# PDF Processing
+# PDF, Image, and Layout Processing
 # ===============================
 PyMuPDF==1.23.8
 pdfplumber==0.10.3
-camelot-py
+camelot-py[cv]
 opencv-python==4.8.1.78
-ghostscript
+layoutparser
+iopath # Required by Detectron2
+
 # ===============================
 # Website Extraction
 # ===============================
@@ -45,20 +46,6 @@ numpy==1.26.2
 Pillow==10.1.0
 
 # ===============================
-# Utilities
-# ===============================
-tqdm==4.66.1
-aiohttp==3.9.1
-asyncio==3.4.3
-
-# ===============================
-# Development
-# ===============================
-pytest-asyncio==0.21.1
-ipython==8.18.1
-jupyter==1.0.0
-
-# ===============================
 # Video Processing
 # ===============================
 openai-whisper
@@ -66,15 +53,33 @@ yt-dlp
 youtube-transcript-api
 moviepy
 
-torch
-torchaudio
+# ===============================
+# Utilities
+# ===============================
+tqdm==4.66.1
+aiohttp==3.9.1
 
 # ===============================
-# Optional: LayoutParser (Advanced PDF table/figure detection)
+# Development (Optional, can be moved to a requirements-dev.txt)
 # ===============================
-layoutparser
-layoutparser[paddledetection,torch]
+pytest-asyncio==0.21.1
+ipython==8.18.1
+jupyter==1.0.0
 
-# To install Detectron2 (used internally by LayoutParser for deep layout models):
-# Run manually (outside requirements.txt):
-# pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# -------------------------------------------------------------------
+# MANUAL INSTALLATION REQUIRED FOR THE FOLLOWING LIBRARIES
+# -------------------------------------------------------------------
+# 1. GHOSTSCRIPT: This is a system dependency, not a Python package.
+#    - Windows: Download from ghostscript.com
+#    - macOS: brew install ghostscript
+#    - Linux: sudo apt-get install ghostscript
+#
+# 2. PYTORCH & TORCHAUDIO: Install manually to get GPU (CUDA) support.
+#    - Go to https://pytorch.org/get-started/locally/
+#    - Example for CUDA 11.8:
+#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+# 3. DETECTRON2: Required by LayoutParser for advanced models.
+#    - Run after installing PyTorch:
+#      pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# -------------------------------------------------------------------
