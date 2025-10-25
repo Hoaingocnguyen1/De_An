@@ -62,24 +62,9 @@ aiohttp==3.9.1
 # ===============================
 # Development (Optional, can be moved to a requirements-dev.txt)
 # ===============================
-pytest-asyncio==0.21.1
-ipython==8.18.1
-jupyter==1.0.0
+layoutparser
+layoutparser[layoutmodels]
 
-# -------------------------------------------------------------------
-# MANUAL INSTALLATION REQUIRED FOR THE FOLLOWING LIBRARIES
-# -------------------------------------------------------------------
-# 1. GHOSTSCRIPT: This is a system dependency, not a Python package.
-#    - Windows: Download from ghostscript.com
-#    - macOS: brew install ghostscript
-#    - Linux: sudo apt-get install ghostscript
-#
-# 2. PYTORCH & TORCHAUDIO: Install manually to get GPU (CUDA) support.
-#    - Go to https://pytorch.org/get-started/locally/
-#    - Example for CUDA 11.8:
-#      pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-#
-# 3. DETECTRON2: Required by LayoutParser for advanced models.
-#    - Run after installing PyTorch:
-#      pip install 'git+https://github.com/facebookresearch/detectron2.git'
-# -------------------------------------------------------------------
+# To install Detectron2 (used internally by LayoutParser for deep layout models):
+# Run manually (outside requirements.txt):
+# pip install 'git+https://github.com/facebookresearch/detectron2.git'

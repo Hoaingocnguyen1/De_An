@@ -1,8 +1,3 @@
-"""
-src/Pipeline.py
-Optimized pipeline with fixes for multimodal embedding integration
-"""
-
 import asyncio
 import io
 from typing import List, Dict, Any, Optional
@@ -22,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class OptimizedPipeline:
-    """Optimized ingestion pipeline supporting PDF, YouTube, Video, Website"""
+    """Optimized pipeline with better text chunking"""
     
     def __init__(
         self,
@@ -55,10 +50,10 @@ class OptimizedPipeline:
         file_path: str,
         source_type: str,
         source_uri: str = None,
-        video_extractor = None,  # For youtube/video
-        website_extractor = None  # For website
+        video_extractor = None,
+        website_extractor = None
     ) -> ObjectId:
-        """Process a document with all optimizations - supports all source types"""
+        """Process a document with all optimizations"""
         async with self.executor:
             source_uri = source_uri or file_path
             source_id = self.db.create_source({
@@ -73,27 +68,22 @@ class OptimizedPipeline:
             start_time = datetime.now(timezone.utc)
             
             try:
-                # Route to appropriate processor
                 if source_type == "pdf":
                     kus = await self._process_pdf_optimized(file_path, source_id, source_uri)
-                
                 elif source_type == "youtube":
                     if not video_extractor:
-                        raise ValueError("video_extractor required for YouTube processing")
+                        raise ValueError("video_extractor required")
                     kus = await self._process_youtube(source_uri, source_id, source_uri, video_extractor)
-                
                 elif source_type == "video":
                     if not video_extractor:
-                        raise ValueError("video_extractor required for video processing")
+                        raise ValueError("video_extractor required")
                     kus = await self._process_video(file_path, source_id, source_uri, video_extractor)
-                
                 elif source_type == "website":
                     if not website_extractor:
-                        raise ValueError("website_extractor required for website processing")
+                        raise ValueError("website_extractor required")
                     kus = await self._process_website(source_uri, source_id, source_uri, website_extractor)
-                
                 else:
-                    raise NotImplementedError(f"Source type '{source_type}' is not supported yet.")
+                    raise NotImplementedError(f"Source type '{source_type}' not supported")
                 
                 # Save to MongoDB
                 if kus:
@@ -118,36 +108,60 @@ class OptimizedPipeline:
         source_id: ObjectId,
         source_uri: str
     ) -> List[Dict]:
-        """Optimized PDF processing workflow"""
+        """
+        FIXED: Improved PDF processing with better text chunking
+        """
         
         # Step 1: Extract in parallel
         logger.info("  [1/4] Extracting content in parallel...")
         raw_objects = self.pdf_extractor.extract_parallel(pdf_path)
         logger.info(f"  ✓ Extracted {len(raw_objects)} raw objects")
 
-        # Step 2: Batch enrichment
-        logger.info("  [2/4] Enriching content in batches...")
+        # FIXED: Separate full text from other objects
+        text_objects = [obj for obj in raw_objects if obj['type'] == 'text_chunk']
+        other_objects = [obj for obj in raw_objects if obj['type'] != 'text_chunk']
+        
+        # Combine all text from same page
+        page_texts = {}
+        for obj in text_objects:
+            page = obj.get('page', 1)
+            if page not in page_texts:
+                page_texts[page] = []
+            page_texts[page].append(obj['text'])
+        
+        # Create full text per page
+        full_text_objects = []
+        for page, texts in page_texts.items():
+            combined_text = "\n\n".join(texts)
+            if combined_text.strip():
+                full_text_objects.append({
+                    'type': 'text_chunk',
+                    'text': combined_text,
+                    'page': page,
+                    'bbox': None  # Full page text
+                })
+        
+        logger.info(f"  ✓ Combined text from {len(text_objects)} blocks into {len(full_text_objects)} full-page texts")
+
+        # Step 2: Batch enrichment (only for tables and figures)
+        logger.info("  [2/4] Enriching tables and figures...")
         items_to_enrich = []
         
-        for obj in raw_objects:
+        for obj in other_objects:
             item = {
                 "type": obj['type'],
                 "caption": obj.get('caption', ''),
                 "id": obj.get('figure_id') or obj.get('table_id', '')
             }
             
-            if obj['type'] == 'text_chunk':
-                item['data'] = obj['text']
-            elif obj['type'] == 'table':
+            if obj['type'] == 'table':
                 item['data'] = obj.get('data', {})
             elif obj['type'] == 'figure':
                 try:
-                    # Convert image bytes to PIL Image
                     img_data = obj.get('image_data')
                     if isinstance(img_data, bytes):
                         item['data'] = Image.open(io.BytesIO(img_data))
                     else:
-                        logger.warning(f"Skipping figure {item['id']}: invalid image data")
                         continue
                 except Exception as e:
                     logger.warning(f"Failed to load image: {e}")
@@ -162,72 +176,92 @@ class OptimizedPipeline:
             enriched_batch = await self.enricher.enrich_batch(batch)
             enriched_results.extend(enriched_batch)
         
-        # Map enrichment back to raw objects
+        # Map enrichment back
         enrichment_map = {item.get('id'): item.get('enrichment', {}) for item in enriched_results}
-        for obj in raw_objects:
+        for obj in other_objects:
             obj_id = obj.get('figure_id') or obj.get('table_id', '')
             obj['enrichment'] = enrichment_map.get(obj_id, {})
         
-        logger.info(f"  ✓ Enriched {len(enriched_results)} objects")
+        logger.info(f"  ✓ Enriched {len(enriched_results)} tables/figures")
 
-        # Step 3: Batch embedding
-        logger.info("  [3/4] Generating embeddings in batches...")
+        # Step 3: Generate embeddings
+        logger.info("  [3/4] Generating embeddings...")
         kus_ready = []
-        text_chunks_for_embedding = []
 
-        for obj in raw_objects:
+        # FIXED: Process full-page text with proper chunking
+        for text_obj in full_text_objects:
+            text = text_obj['text']
+            page = text_obj['page']
+            
+            # Chunk and embed the full text
+            chunks = self.embedder.embed_text_chunk(text)
+            
+            logger.info(f"    Page {page}: {len(chunks)} chunks created")
+            
+            for chunk_idx, chunk in enumerate(chunks):
+                kus_ready.append({
+                    'type': 'text_chunk',
+                    'page': page,
+                    'bbox': None,
+                    'chunk_index': chunk_idx,
+                    'text': chunk['text_chunk'],
+                    'embedding_vector': chunk['vector'],
+                    'source_text': chunk['text_chunk'],
+                    'embedding_type': 'text',
+                    'enrichment': {}
+                })
+
+        # Process tables
+        for obj in [o for o in other_objects if o['type'] == 'table']:
             enrichment = obj.get('enrichment', {})
             summary = enrichment.get('summary', '')
             caption = obj.get('caption', '')
-            obj_type = obj['type']
-
-            if obj_type == 'text_chunk':
-                # Text will be chunked and embedded
-                text_chunks_for_embedding.append({
-                    'text': obj['text'],
-                    'page': obj.get('page'),
-                    'bbox': obj.get('bbox')
-                })
-                
-            elif obj_type == 'table':
-                # Embed table using multimodal embedder
+            
+            try:
                 embedding_data = self.embedder.embed_table(
                     table_data=obj.get('data', {}),
                     caption=caption,
                     summary=summary,
-                    table_image=None  # Could render table as image if needed
+                    table_image=None
                 )
                 
-                kus_ready.append({
-                    'type': obj_type,
-                    'page': obj.get('page'),
-                    'bbox': obj.get('bbox'),
-                    'data': obj.get('data'),
-                    'caption': caption,
-                    'enrichment': enrichment,
-                    'embedding_vector': embedding_data['vector'],
-                    'source_text': embedding_data['source_text'],
-                    'embedding_type': embedding_data.get('embedding_type', 'text')
-                })
-                
-            elif obj_type == 'figure':
-                # Embed figure using multimodal embedder
-                try:
-                    img_data = obj.get('image_data')
-                    if isinstance(img_data, bytes):
-                        image = Image.open(io.BytesIO(img_data))
-                    else:
-                        logger.warning("Invalid image data for figure")
-                        continue
-                    
-                    embedding_data = self.embedder.embed_figure(
-                        image=image,
-                        caption=caption,
-                        summary=summary
-                    )
-                    
+                if embedding_data['vector']:  # Only add if embedding succeeded
                     kus_ready.append({
-                        'type': obj_type,
+                        'type': 'table',
+                        'page': obj.get('page'),
+                        'bbox': obj.get('bbox'),
+                        'data': obj.get('data'),
+                        'caption': caption,
+                        'enrichment': enrichment,
+                        'embedding_vector': embedding_data['vector'],
+                        'source_text': embedding_data['source_text'],
+                        'embedding_type': embedding_data.get('embedding_type', 'text')
+                    })
+            except Exception as e:
+                logger.error(f"Failed to embed table: {e}")
+
+        # Process figures
+        for obj in [o for o in other_objects if o['type'] == 'figure']:
+            enrichment = obj.get('enrichment', {})
+            summary = enrichment.get('summary', '')
+            caption = obj.get('caption', '')
+            
+            try:
+                img_data = obj.get('image_data')
+                if isinstance(img_data, bytes):
+                    image = Image.open(io.BytesIO(img_data))
+                else:
+                    continue
+                
+                embedding_data = self.embedder.embed_figure(
+                    image=image,
+                    caption=caption,
+                    summary=summary
+                )
+                
+                if embedding_data['vector']:  # Only add if embedding succeeded
+                    kus_ready.append({
+                        'type': 'figure',
                         'page': obj.get('page'),
                         'bbox': obj.get('bbox'),
                         'figure_id': obj.get('figure_id'),
@@ -239,28 +273,13 @@ class OptimizedPipeline:
                         'source_text': embedding_data['source_text'],
                         'embedding_type': embedding_data.get('embedding_type', 'multimodal')
                     })
-                except Exception as e:
-                    logger.error(f"Failed to embed figure: {e}")
-                    continue
-
-        # Process text chunks
-        for text_chunk_data in text_chunks_for_embedding:
-            text = text_chunk_data['text']
-            chunks = self.embedder.embed_text_chunk(text)
-            
-            for chunk in chunks:
-                kus_ready.append({
-                    'type': 'text_chunk',
-                    'page': text_chunk_data.get('page'),
-                    'bbox': text_chunk_data.get('bbox'),
-                    'text': chunk['text_chunk'],
-                    'embedding_vector': chunk['vector'],
-                    'source_text': chunk['text_chunk'],
-                    'embedding_type': 'text',
-                    'enrichment': {}  # Text chunks typically don't need enrichment
-                })
+            except Exception as e:
+                logger.error(f"Failed to embed figure: {e}")
         
         logger.info(f"  ✓ Generated embeddings for {len(kus_ready)} knowledge units")
+        logger.info(f"    - Text chunks: {sum(1 for k in kus_ready if k['type'] == 'text_chunk')}")
+        logger.info(f"    - Tables: {sum(1 for k in kus_ready if k['type'] == 'table')}")
+        logger.info(f"    - Figures: {sum(1 for k in kus_ready if k['type'] == 'figure')}")
 
         # Step 4: Create Knowledge Units
         logger.info("  [4/4] Finalizing Knowledge Units...")
@@ -275,34 +294,28 @@ class OptimizedPipeline:
         youtube_url: str,
         source_id: ObjectId,
         source_uri: str,
-        video_extractor  # Pass extractor from outside
+        video_extractor
     ) -> List[Dict]:
-        """Optimized YouTube processing workflow"""
-        
-        # Step 1: Extract transcript
+        """Process YouTube video"""
         logger.info("  [1/3] Extracting transcript...")
         transcripts = await video_extractor.extract_from_sources([youtube_url])
         transcript_data = transcripts.get(youtube_url, [])
         
         if not transcript_data:
-            raise ValueError("No transcript extracted from YouTube video")
+            raise ValueError("No transcript extracted")
         
-        logger.info(f"  ✓ Extracted {len(transcript_data)} transcript segments")
+        logger.info(f"  ✓ Extracted {len(transcript_data)} segments")
         
-        # Step 2: Batch embedding
-        logger.info("  [2/3] Generating embeddings in batches...")
+        logger.info("  [2/3] Generating embeddings...")
         texts_to_embed = [seg.get('text', '').strip() for seg in transcript_data if seg.get('text', '').strip()]
         
         if not texts_to_embed:
-            raise ValueError("No valid text found in transcript")
+            raise ValueError("No valid text found")
         
-        # Embed all texts in batch
         vectors = self.embedder.text_embedder.embed_batch(texts_to_embed, input_type="document")
+        logger.info(f"  ✓ Generated {len(vectors)} embeddings")
         
-        logger.info(f"  ✓ Generated embeddings for {len(vectors)} segments")
-        
-        # Step 3: Create Knowledge Units
-        logger.info("  [3/3] Finalizing Knowledge Units...")
+        logger.info("  [3/3] Creating Knowledge Units...")
         kus = []
         
         for idx, (segment, vector) in enumerate(zip(transcript_data, vectors)):
@@ -317,14 +330,7 @@ class OptimizedPipeline:
                 "ku_id": f"youtube_{source_id}_segment_{idx}",
                 "ku_type": "text_chunk",
                 "created_at": datetime.utcnow(),
-                
-                # Raw content
-                "raw_content": {
-                    "text": text,
-                    "asset_uri": None,
-                },
-                
-                # Context
+                "raw_content": {"text": text, "asset_uri": None},
                 "context": {
                     "page_number": None,
                     "bounding_box": None,
@@ -332,11 +338,7 @@ class OptimizedPipeline:
                     "end_time_seconds": segment.get('end'),
                     "direct_url": f"{youtube_url}&t={int(segment.get('start', 0))}s"
                 },
-                
-                # Enriched content (can be added later if needed)
                 "enriched_content": None,
-                
-                # Embeddings
                 "embeddings": {
                     "vector": vector,
                     "model": self.embedder.text_embedder.model_name
@@ -344,44 +346,34 @@ class OptimizedPipeline:
             }
             kus.append(ku)
         
-        logger.info(f"  ✓ Created {len(kus)} knowledge units")
         return kus
-
 
     async def _process_website(
         self,
         url: str,
         source_id: ObjectId,
         source_uri: str,
-        website_extractor  # Pass extractor from outside
+        website_extractor
     ) -> List[Dict]:
-        """Optimized website processing workflow"""
-        
-        # Step 1: Extract content
-        logger.info("  [1/3] Extracting website content...")
+        """Process website"""
+        logger.info("  [1/3] Extracting content...")
         extracted = await website_extractor.extract_from_urls([url])
         content = extracted.get(url)
         
         if not content:
-            raise ValueError("No content extracted from website")
+            raise ValueError("No content extracted")
         
         logger.info(f"  ✓ Extracted {len(content)} characters")
         
-        # Step 2: Chunk and embed
-        logger.info("  [2/3] Chunking and embedding text...")
-        text_chunks = self.embedder.text_embedder.chunk_and_embed(
-            content,
-            chunk_size=1000,
-            chunk_overlap=200
-        )
+        logger.info("  [2/3] Chunking and embedding...")
+        text_chunks = self.embedder.text_embedder.chunk_and_embed(content, chunk_size=1000, chunk_overlap=200)
         
         if not text_chunks:
-            raise ValueError("No text chunks generated from website content")
+            raise ValueError("No chunks generated")
         
-        logger.info(f"  ✓ Generated {len(text_chunks)} text chunks with embeddings")
+        logger.info(f"  ✓ Generated {len(text_chunks)} chunks")
         
-        # Step 3: Create Knowledge Units
-        logger.info("  [3/3] Finalizing Knowledge Units...")
+        logger.info("  [3/3] Creating Knowledge Units...")
         kus = []
         
         for idx, chunk in enumerate(text_chunks):
@@ -392,14 +384,7 @@ class OptimizedPipeline:
                 "ku_id": f"website_{source_id}_text_{idx}",
                 "ku_type": "text_chunk",
                 "created_at": datetime.utcnow(),
-                
-                # Raw content
-                "raw_content": {
-                    "text": chunk['text_chunk'],
-                    "asset_uri": None,
-                },
-                
-                # Context
+                "raw_content": {"text": chunk['text_chunk'], "asset_uri": None},
                 "context": {
                     "page_number": None,
                     "bounding_box": None,
@@ -407,11 +392,7 @@ class OptimizedPipeline:
                     "end_time_seconds": None,
                     "direct_url": url
                 },
-                
-                # Enriched content
                 "enriched_content": None,
-                
-                # Embeddings
                 "embeddings": {
                     "vector": chunk['vector'],
                     "model": self.embedder.text_embedder.model_name
@@ -419,43 +400,30 @@ class OptimizedPipeline:
             }
             kus.append(ku)
         
-        logger.info(f"  ✓ Created {len(kus)} knowledge units")
         return kus
-
 
     async def _process_video(
         self,
         video_path: str,
         source_id: ObjectId,
         source_uri: str,
-        video_extractor  # Pass extractor from outside
+        video_extractor
     ) -> List[Dict]:
-        """Optimized local video processing workflow"""
-        
-        # Step 1: Extract transcript
-        logger.info("  [1/3] Extracting audio and transcribing...")
+        """Process local video - similar to YouTube"""
+        logger.info("  [1/3] Extracting transcript...")
         transcripts = await video_extractor.extract_from_sources([video_path])
         transcript_data = transcripts.get(video_path, [])
         
         if not transcript_data:
-            raise ValueError("No transcript extracted from video file")
+            raise ValueError("No transcript extracted")
         
-        logger.info(f"  ✓ Extracted {len(transcript_data)} transcript segments")
+        logger.info(f"  ✓ Extracted {len(transcript_data)} segments")
         
-        # Step 2: Batch embedding
-        logger.info("  [2/3] Generating embeddings in batches...")
+        logger.info("  [2/3] Generating embeddings...")
         texts_to_embed = [seg.get('text', '').strip() for seg in transcript_data if seg.get('text', '').strip()]
-        
-        if not texts_to_embed:
-            raise ValueError("No valid text found in transcript")
-        
-        # Embed all texts in batch
         vectors = self.embedder.text_embedder.embed_batch(texts_to_embed, input_type="document")
         
-        logger.info(f"  ✓ Generated embeddings for {len(vectors)} segments")
-        
-        # Step 3: Create Knowledge Units
-        logger.info("  [3/3] Finalizing Knowledge Units...")
+        logger.info("  [3/3] Creating Knowledge Units...")
         kus = []
         
         for idx, (segment, vector) in enumerate(zip(transcript_data, vectors)):
@@ -470,26 +438,15 @@ class OptimizedPipeline:
                 "ku_id": f"video_{source_id}_segment_{idx}",
                 "ku_type": "text_chunk",
                 "created_at": datetime.utcnow(),
-                
-                # Raw content
-                "raw_content": {
-                    "text": text,
-                    "asset_uri": None,
-                },
-                
-                # Context
+                "raw_content": {"text": text, "asset_uri": None},
                 "context": {
                     "page_number": None,
                     "bounding_box": None,
                     "start_time_seconds": segment.get('start'),
                     "end_time_seconds": segment.get('end'),
-                    "direct_url": None  # No direct URL for local files
+                    "direct_url": None
                 },
-                
-                # Enriched content
                 "enriched_content": None,
-                
-                # Embeddings
                 "embeddings": {
                     "vector": vector,
                     "model": self.embedder.text_embedder.model_name
@@ -497,9 +454,7 @@ class OptimizedPipeline:
             }
             kus.append(ku)
         
-        logger.info(f"  ✓ Created {len(kus)} knowledge units")
         return kus
-
 
     def _create_knowledge_units(
         self,
@@ -515,7 +470,6 @@ class OptimizedPipeline:
             obj_type = obj.get('type')
             enrichment = obj.get('enrichment', {})
             
-            # Build KU according to schema
             ku = {
                 "source_id": source_id,
                 "source_type": source_type,
@@ -523,14 +477,10 @@ class OptimizedPipeline:
                 "ku_id": f"{source_type}_{source_id}_{obj_type}_{idx}",
                 "ku_type": obj_type,
                 "created_at": datetime.utcnow(),
-                
-                # Raw content
                 "raw_content": {
                     "text": obj.get('text') or obj.get('source_text'),
-                    "asset_uri": None,  # Could upload to GCS/S3
+                    "asset_uri": None,
                 },
-                
-                # Context
                 "context": {
                     "page_number": obj.get('page'),
                     "bounding_box": obj.get('bbox'),
@@ -538,15 +488,11 @@ class OptimizedPipeline:
                     "end_time_seconds": None,
                     "direct_url": None
                 },
-                
-                # Enriched content
                 "enriched_content": {
                     "summary": enrichment.get('summary'),
                     "keywords": enrichment.get('keywords', []),
                     "analysis_model": "gemini-2.5-pro"
                 } if enrichment else None,
-                
-                # Embeddings
                 "embeddings": {
                     "vector": obj.get('embedding_vector', []),
                     "model": self.embedder.text_embedder.model_name 
@@ -577,7 +523,7 @@ class OptimizedPipeline:
         source_type: str,
         source_uri: str = None
     ) -> ObjectId:
-        """Synchronous wrapper for async processing"""
+        """Synchronous wrapper"""
         return asyncio.run(
             self.process_document_async(file_path, source_type, source_uri)
         )
