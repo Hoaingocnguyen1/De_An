@@ -42,20 +42,7 @@ class VoyageConfig(BaseModel):
 class GeminiConfig(BaseModel):
     """Gemini configuration with vision support"""
     api_key: str = Field(..., description="Gemini API key")
-    
-    # Model selection
-    text_model: str = Field(
-        default="gemini-2.0-flash-exp",
-        description="Model for text synthesis"
-    )
-    vision_model: str = Field(
-        default="gemini-2.0-flash-exp",
-        description="Model for vision tasks (layout, tables, figures)"
-    )
-    pro_model: str = Field(
-        default="gemini-2.5-pro",
-        description="Model for complex reasoning (optional)"
-    )
+    model_name: str = "gemini-2.5-flash"    
     
     # Generation settings
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -81,36 +68,14 @@ class GeminiConfig(BaseModel):
 
 
 class ProcessingConfig(BaseModel):
-    """Pipeline processing configuration"""
     max_workers: int = Field(default=4, ge=1, le=32)
     batch_size: int = Field(default=16, ge=1, le=128)
     
-    # VLM extraction (replaces LayoutParser)
-    use_vlm_extraction: bool = Field(
-        default=True,
-        description="Use VLM for layout detection and table extraction"
-    )
-    vlm_for_tables: bool = Field(
-        default=True,
-        description="Use VLM for table extraction (more accurate)"
-    )
-    vlm_for_figures: bool = Field(
-        default=True,
-        description="Use VLM for figure analysis"
-    )
+    # VLM bắt buộc cho layout detection
+    use_vlm_detection: bool = Field(default=True, description="Use VLM to detect tables/figures")
     
-    # Fallback settings
-    enable_fallback_extraction: bool = Field(
-        default=True,
-        description="Use basic extraction if VLM fails"
-    )
-    
-    # Video/audio
-    whisper_model: Literal["tiny", "base", "small", "medium", "large"] = Field(
-        default="base"
-    )
-    
-    # Other
+    # Whisper
+    whisper_model: Literal["tiny", "base", "small", "medium", "large"] = Field(default="base")
     max_concurrent_enrichment: int = Field(default=10, ge=1, le=50)
 
 
@@ -219,7 +184,6 @@ class Config(BaseModel):
         print(f"\n  Processing:")
         print(f"  - Workers: {self.processing.max_workers}")
         print(f"  - Batch Size: {self.processing.batch_size}")
-        print(f"  - LayoutParser: {self.processing.use_layoutparser}")
         print(f"  - Whisper Model: {self.processing.whisper_model}")
         
         print(f"\n Query:")

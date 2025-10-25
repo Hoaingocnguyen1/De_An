@@ -13,10 +13,10 @@ class BoundingBox(BaseModel):
 
 class LayoutRegion(BaseModel):
     """Single layout region detected by VLM"""
-    type: Literal["text_block", "table", "figure", "title", "list", "equation"]
+    type: Literal["table", "figure"]
     bbox: BoundingBox
     confidence: float = Field(ge=0.0, le=1.0, default=0.9)
-    description: str = Field(max_length=200)
+    description: str = Field(max_length=10000)
 
 class LayoutDetectionOutput(BaseModel):
     """Complete page layout analysis"""
@@ -35,18 +35,32 @@ class TableCell(BaseModel):
     colspan: int = Field(ge=1, default=1)
 
 class TableExtractionOutput(BaseModel):
-    """Structured table extraction"""
-    headers: List[str] = Field(min_items=1, description="Column headers")
-    rows: List[List[str]] = Field(min_items=0, description="Data rows")
+    """Structured table extraction with flexible validation"""
+    headers: List[str] = Field(
+        min_length=1, 
+        description="Column headers (at least 1 required)"
+    )
+    rows: List[List[str]] = Field(
+        default_factory=list, 
+        description="Data rows (can be empty)"
+    )
     metadata: dict = Field(default_factory=dict)
-    num_rows: int = Field(ge=0)
-    num_cols: int = Field(ge=1)
+    num_rows: int = Field(ge=0, description="Number of data rows")
+    num_cols: int = Field(ge=1, description="Number of columns (at least 1)")
     has_merged_cells: bool = False
-    extraction_confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+    extraction_confidence: float = Field(
+        ge=0.0, 
+        le=1.0, 
+        default=0.8,
+        description="Confidence score"
+    )
     
     def to_dataframe(self):
         """Convert to pandas DataFrame"""
         import pandas as pd
+        if not self.rows:
+            # Empty table with headers only
+            return pd.DataFrame(columns=self.headers)
         return pd.DataFrame(self.rows, columns=self.headers)
     
 class NumericalData(BaseModel):
@@ -66,7 +80,7 @@ class FigureAnalysisOutput(BaseModel):
     numerical_data: List[NumericalData] = Field(default_factory=list)
     labels_detected: List[str] = Field(default_factory=list)
     has_legend: bool = False
-    relevance_to_research: str = Field(max_length=300)
+    relevance_to_research: str = Field(max_length=10000)
     extraction_confidence: float = Field(ge=0.0, le=1.0)
 
 class ResearchMetadata(BaseModel):

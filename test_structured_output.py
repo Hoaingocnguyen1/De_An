@@ -22,7 +22,7 @@ async def test_layout_detection():
     prompt = """Analyze this document page layout.
     
 Identify all regions with their bounding boxes and types.
-Focus on: tables, figures, text blocks, titles."""
+Focus on: tables, figures, and caption """
     
     result = await client.create_structured_completion(
         prompt=prompt,

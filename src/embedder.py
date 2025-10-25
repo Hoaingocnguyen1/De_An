@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import pandas as pd
 import voyageai
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from PIL import Image
 import io
 import base64

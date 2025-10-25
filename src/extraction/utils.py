@@ -46,37 +46,25 @@ class PDFUtils:
     # _layout_model = None
     _init_attempted = False
     @staticmethod
-    async def detect_layout_with_vlm(
-        page: fitz.Page,
-        vlm_client,
-        page_num: int
-    ) -> Optional[LayoutDetectionOutput]:
-        """
-        VLM-based layout detection (replaces LayoutParser)
-        """
+    async def detect_layout_with_vlm(page_image: Image.Image, vlm_client, page_num: int) -> Optional[LayoutDetectionOutput]:
+        """VLM detect tables & figures"""
         try:
-            # Convert to high-res image
-            pix = page.get_pixmap(dpi=200)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
             prompt = f"""Analyze page {page_num + 1} layout.
 
-Detect all regions with precise bounding boxes:
-- Tables (structured data in rows/columns)
-- Figures (charts, diagrams, images)
+    Detect ALL regions with PRECISE bounding boxes (pixel coordinates):
+    - Tables (structured data in rows/columns)
+    - Figures (charts, diagrams, images)
 
-Provide pixel coordinates relative to image dimensions: {pix.width}×{pix.height}"""
+    Image size: {page_image.width}×{page_image.height}px"""
             
             result = await vlm_client.create_structured_completion(
                 prompt=prompt,
                 response_model=LayoutDetectionOutput,
-                image=img
+                image=page_image
             )
             
             if result:
-                logger.info(f"Page {page_num + 1}: VLM detected "
-                          f"{len(result.regions)} regions")
-            
+                logger.info(f"Page {page_num+1}: VLM detected {len(result.regions)} regions")
             return result
             
         except Exception as e:
@@ -84,131 +72,101 @@ Provide pixel coordinates relative to image dimensions: {pix.width}×{pix.height
             return None
     
     @staticmethod
-    async def extract_table_with_vlm(
-        page: fitz.Page,
-        table_bbox: BoundingBox,
-        vlm_client,
-        page_num: int
-    ) -> Optional[Dict]:
-        """
-        VLM-based table extraction (replaces Camelot/pdfplumber)
-        """
+    async def extract_table_with_vlm(table_image: Image.Image, vlm_client, page_num: int, caption: str = "") -> Optional[Dict]:
+        """VLM extract table structure with robust handling"""
         try:
-            # Crop table region with padding
-            padding = 10
-            crop_rect = fitz.Rect(
-                table_bbox.x1 - padding,
-                table_bbox.y1 - padding,
-                table_bbox.x2 + padding,
-                table_bbox.y2 + padding
-            )
-            
-            pix = page.get_pixmap(dpi=300, clip=crop_rect)
-            table_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            prompt = """Extract this table's complete structure.
+            prompt = f"""Extract this table's structure. Caption: {caption}
 
-Critical requirements:
-1. Identify ALL column headers (handle multi-level if present)
-2. Extract ALL data rows accurately
-3. Preserve numerical values exactly
-4. Note any merged cells or special formatting
+    INSTRUCTIONS:
+    1. Identify ALL column headers (if no headers visible, use "Col1", "Col2", etc.)
+    2. Extract ALL data rows as strings
+    3. Count rows and columns accurately
+    4. Set has_merged_cells to true if you see merged cells
+    5. Set extraction_confidence between 0.0 and 1.0
 
-Return precise structured data."""
-            
+    IMPORTANT: You MUST return a valid JSON object with all fields, even if the table is difficult to read.
+    """
             result = await vlm_client.create_structured_completion(
                 prompt=prompt,
                 response_model=TableExtractionOutput,
-                image=table_img
+                image=table_image
             )
             
-            if result:
-                logger.info(f"Page {page_num + 1}: Extracted table "
-                          f"({result.num_rows}×{result.num_cols})")
-                
-                return {
-                    "type": "table",
-                    "page": page_num + 1,
-                    "bbox": [table_bbox.x1, table_bbox.y1, 
-                            table_bbox.x2, table_bbox.y2],
-                    "headers": result.headers,
-                    "rows": result.rows,
-                    "data": result.to_dataframe().to_dict(orient='records'),
-                    "metadata": {
-                        "extraction_method": "vlm",
-                        "confidence": result.extraction_confidence,
-                        "has_merged_cells": result.has_merged_cells
-                    }
-                }
+            if not result:
+                logger.warning(f"Page {page_num+1}: VLM returned None for table")
+                return None
             
-            return None
+            # Validate result
+            if not result.headers or len(result.headers) == 0:
+                logger.warning(f"Page {page_num+1}: Table has no headers")
+                return None
+            
+            if result.num_cols < 1:
+                logger.warning(f"Page {page_num+1}: Table has 0 columns")
+                return None
+            
+            # Convert to dict
+            df = result.to_dataframe()
+            if df.empty:
+                logger.warning(f"Page {page_num+1}: Table DataFrame is empty")
+                return None
+            
+            logger.info(f"Page {page_num+1}: Extracted table ({result.num_rows}×{result.num_cols})")
+            
+            return {
+                "type": "table",
+                "page": page_num + 1,
+                "headers": result.headers,
+                "rows": result.rows,
+                "data": df.to_dict(orient='records'),
+                "caption": caption,
+                "metadata": {
+                    "extraction_method": "vlm",
+                    "confidence": result.extraction_confidence
+                }
+            }
             
         except Exception as e:
-            logger.error(f"VLM table extraction failed: {e}")
+            logger.error(f"Page {page_num+1}: VLM table extraction failed - {e}")
             return None
     
     @staticmethod
-    async def analyze_figure_with_vlm(
-        image_data: bytes,
-        caption: str,
-        vlm_client,
-        page_num: int,
-        figure_id: str
-    ) -> Optional[Dict]:
-        """
-        Deep figure analysis with VLM
-        """
+    async def analyze_figure_with_vlm(figure_image: Image.Image, vlm_client, page_num: int, caption: str = "") -> Optional[Dict]:
+        """VLM analyze figure"""
         try:
-            img = Image.open(io.BytesIO(image_data))
-            
-            prompt = f"""Analyze this research figure from page {page_num + 1}.
+            prompt = f"""Analyze this research figure. Caption: {caption}
 
-Caption: {caption}
+    Provide:
+    1. Figure type (chart type, diagram type, etc.)
+    2. Key findings and trends
+    3. Numerical values, labels, legends
+    4. Research relevance
 
-Provide comprehensive analysis:
-1. Identify figure type (chart type, diagram type, etc.)
-2. Extract key findings and trends shown
-3. Detect any numerical values, labels, legends
-4. Explain research relevance and insights
-
-Focus on information useful for R&D literature review."""
+    Focus on information useful for R&D."""
             
             result = await vlm_client.create_structured_completion(
                 prompt=prompt,
                 response_model=FigureAnalysisOutput,
-                image=img
+                image=figure_image
             )
             
             if result:
-                logger.info(f"Page {page_num + 1}: Analyzed figure "
-                          f"({result.figure_type})")
-                
+                logger.info(f"Page {page_num+1}: Analyzed figure ({result.figure_type})")
                 return {
                     "type": "figure",
                     "page": page_num + 1,
-                    "figure_id": figure_id,
-                    "image_data": image_data,
-                    "width": img.width,
-                    "height": img.height,
                     "caption": caption,
-                    "enrichment": {
-                        "summary": f"{result.figure_type}: {result.relevance_to_research}",
-                        "keywords": result.labels_detected[:10],
-                        "analysis": {
-                            "figure_type": result.figure_type,
-                            "key_findings": result.key_findings,
-                            "numerical_data": [nd.model_dump() for nd in result.numerical_data],
-                            "confidence": result.extraction_confidence
-                        }
-                    }
+                    "figure_type": result.figure_type,
+                    "key_findings": result.key_findings,
+                    "numerical_data": [nd.model_dump() for nd in result.numerical_data],
+                    "confidence": result.extraction_confidence
                 }
-            
             return None
             
         except Exception as e:
             logger.error(f"VLM figure analysis failed: {e}")
             return None
-  
+
     @staticmethod
     def extract_all_text_optimized(page: fitz.Page, min_length: int = 1000) -> str:
         """

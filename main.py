@@ -300,7 +300,7 @@ async def initialize_system() -> MultimodalRAGSystem:
 
     # Extractors
     pdf_extractor = PDFExtractor(
-        use_layoutparser=config.processing.use_layoutparser,
+        max_workers=config.processing.max_workers,
         extract_images=True,
         extract_tables=True
     )
@@ -349,8 +349,8 @@ async def main():
     # ==================== CONFIGURATION ====================
     # Test papers for R&D automation
     SOURCES_TO_INGEST = [
-        {'type': 'pdf', 'path': 'documents/attention_is_all_you_need.pdf'},
-        {'type': 'pdf', 'path': 'documents/bert.pdf'},
+        {'type': 'pdf', 'path': 'documents/1706.03762v7.pdf'},
+        # {'type': 'pdf', 'path': 'documents/bert.pdf'},
         # {'type': 'youtube', 'url': 'https://youtu.be/...'},  # Conference talk
     ]
     

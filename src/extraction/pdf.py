@@ -3,6 +3,7 @@ src/extraction/pdf.py
 High-performance PDF extraction using asyncio for handling multiple files
 and multiprocessing for parallel page processing.
 """
+from PIL import Image
 import fitz
 import logging
 import asyncio
@@ -17,18 +18,17 @@ from .utils import PDFUtils
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 def _process_page_worker(args: tuple) -> List[Dict]:
-    """
-    SIMPLIFIED: VLM-based processing (no LayoutParser)
-    """
-    pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag, vlm_config = args
+    """Extract text and page image for VLM processing"""
+    pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag = args
     extracted_data = []
     
     try:
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_num)
         
-        # 1. Extract full text (always)
+        # 1. Extract full text
         full_text = PDFUtils.extract_all_text_optimized(page, min_text_length)
         if full_text:
             extracted_data.append({
@@ -38,14 +38,17 @@ def _process_page_worker(args: tuple) -> List[Dict]:
                 'bbox': list(page.rect)
             })
         
-        # 2. VLM layout detection (async, handled separately)
-        # This is now done in async pipeline
-        
-        # 3. Extract images
-        if extract_images_flag:
-            extracted_data.extend(
-                PDFUtils.extract_images_improved(page, page_num)
-            )
+        # 2. Convert page to image for VLM
+        pix = page.get_pixmap(dpi=200)
+        from PIL import Image
+        page_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        extracted_data.append({
+            'type': 'page_image_for_vlm',
+            'page': page_num + 1,
+            'image': page_image,
+            'width': pix.width,
+            'height': pix.height
+        })
         
         doc.close()
         
@@ -77,9 +80,7 @@ class PDFExtractor:
         logger.info(f"PDFExtractor initialized (VLM: {use_vlm})")
 
     def extract_parallel(self, pdf_path: str) -> List[Dict]:
-        """
-        Processes a single PDF in parallel using a pool of processes.
-        """
+        """Processes a single PDF in parallel using a pool of processes."""
         logger.info(f"Starting parallel extraction for: {pdf_path}")
         if self.use_vlm:
             logger.info("  🔍 Using VLM for layout detection")
@@ -88,9 +89,9 @@ class PDFExtractor:
             with fitz.open(pdf_path) as doc:
                 num_pages = len(doc)
             
+            # Bỏ vlm_config khỏi tasks
             tasks = [
-                (pdf_path, i, self.min_text_length, self.extract_images, 
-                 self.extract_tables, self.use_vlm) 
+                (pdf_path, i, self.min_text_length, self.extract_images, self.extract_tables) 
                 for i in range(num_pages)
             ]
             
