@@ -4,6 +4,11 @@ import io
 import base64
 from typing import Dict, Any, List, Optional
 import logging
+from google.generativeai.types import GenerationConfig
+import asyncio
+from typing import Type, Optional, Dict, Any, List
+from pydantic import BaseModel, ValidationError
+import json
 
 from .base_client import BaseLLMClient
 
@@ -11,11 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiClient(BaseLLMClient):
-    """
-    Gemini client optimized for both enrichment and answer synthesis
-    Uses Gemini 2.0 Flash for fast, high-quality responses
-    """
-    
     def __init__(
         self, 
         api_key: str, 
@@ -78,13 +78,6 @@ class GeminiClient(BaseLLMClient):
         """
         Synthesize a comprehensive answer from retrieved contexts
         Optimized for RAG synthesis with clear, accurate responses
-        
-        Args:
-            question: User's question (can include context in prompt)
-            context: Retrieved context (can be empty if already in question)
-        
-        Returns:
-            Synthesized answer string
         """
         try:
             # If context is provided separately, combine with question
@@ -185,3 +178,85 @@ Provide your response in JSON format:
         except Exception as e:
             logger.error(f"Content enrichment failed: {e}")
             return None
+        
+    async def create_structured_completion(
+        self,
+        prompt: str,
+        response_model: Type[BaseModel],
+        image: Optional[Image.Image] = None,
+        max_retries: int = 3,
+        use_cache: bool = True
+    ) -> Optional[BaseModel]:
+
+        # Check cache
+        cache_key = None
+        if use_cache:
+            cache_key = hash((prompt, str(response_model), id(image)))
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+        
+        # Get JSON schema
+        schema = response_model.model_json_schema()
+        
+        # Build strict prompt
+        system_instruction = f"""You are a structured data extraction assistant.
+You MUST respond with valid JSON matching this exact schema:
+
+{json.dumps(schema, indent=2)}
+
+Rules:
+- Return ONLY valid JSON, no markdown, no explanations
+- All required fields must be present
+- Respect field types and constraints
+- Use null for optional missing fields"""
+
+        full_prompt = f"{system_instruction}\n\n{prompt}"
+        
+        # Prepare content
+        content = [full_prompt]
+        if image:
+            content.insert(0, image)
+        
+        # Configure for JSON output
+        generation_config = GenerationConfig(
+            temperature=0.1,  # Low temperature for structured output
+            response_mime_type="application/json",  # Force JSON
+        )
+        
+        # Retry loop
+        for attempt in range(max_retries):
+            try:
+                model = genai.GenerativeModel(
+                    model_name=self.model_name,
+                    generation_config=generation_config
+                )
+                
+                response = await model.generate_content_async(content)
+                
+                if not response or not response.text:
+                    logger.warning(f"Empty response (attempt {attempt + 1})")
+                    continue
+                
+                # Parse with Pydantic (will validate)
+                result = response_model.model_validate_json(response.text)
+                
+                # Cache and return
+                if use_cache and cache_key:
+                    self._cache[cache_key] = result
+                
+                logger.info(f"✓ Structured output validated: {response_model.__name__}")
+                return result
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON parse error (attempt {attempt + 1}): {e}")
+                logger.debug(f"Raw response: {response.text[:200]}")
+                
+            except ValidationError as e:
+                logger.warning(f"Validation error (attempt {attempt + 1}): {e}")
+                logger.debug(f"Response: {response.text[:200]}")
+                
+            except Exception as e:
+                logger.error(f"Unexpected error (attempt {attempt + 1}): {e}")
+        
+        logger.error(f"Failed after {max_retries} attempts")
+        return None

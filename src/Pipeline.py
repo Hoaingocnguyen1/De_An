@@ -102,7 +102,194 @@ class OptimizedPipeline:
                 self.db.update_source_status(source_id, "failed", str(e))
                 raise
 
-    async def _process_pdf_optimized(
+    async def _process_pdf_with_vlm(
+        self,
+        pdf_path: str,
+        source_id: ObjectId,
+        source_uri: str
+    ) -> List[Dict]:
+        """
+        REFACTORED: VLM-based PDF processing
+        """
+        logger.info("  [1/5] Extracting text and images...")
+        
+        # Step 1: Basic extraction (text + raw images)
+        raw_objects = self.pdf_extractor.extract_parallel(pdf_path)
+        
+        text_objects = [obj for obj in raw_objects if obj['type'] == 'text_chunk']
+        image_objects = [obj for obj in raw_objects if obj['type'] == 'figure']
+        
+        logger.info(f"  ✓ Extracted {len(text_objects)} text blocks, "
+                   f"{len(image_objects)} images")
+        
+        # Step 2: VLM layout detection per page
+        logger.info("  [2/5] Detecting layout with VLM...")
+        
+        tables_detected = []
+        figures_enhanced = []
+        
+        with fitz.open(pdf_path) as doc:
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                
+                # Detect layout
+                layout = await PDFUtils.detect_layout_with_vlm(
+                    page, self.vlm_client, page_num
+                )
+                
+                if not layout:
+                    continue
+                
+                # Extract tables
+                for region in layout.regions:
+                    if region.type == "table":
+                        table_data = await PDFUtils.extract_table_with_vlm(
+                            page, region.bbox, self.vlm_client, page_num
+                        )
+                        if table_data:
+                            tables_detected.append(table_data)
+                
+                # Match figures with analysis
+                for region in layout.regions:
+                    if region.type == "figure":
+                        # Find matching image
+                        for img_obj in image_objects:
+                            if img_obj['page'] == page_num + 1:
+                                analysis = await PDFUtils.analyze_figure_with_vlm(
+                                    img_obj['image_data'],
+                                    region.description,
+                                    self.vlm_client,
+                                    page_num,
+                                    img_obj['figure_id']
+                                )
+                                if analysis:
+                                    figures_enhanced.append(analysis)
+                                    image_objects.remove(img_obj)
+                                break
+        
+        logger.info(f"  ✓ Detected {len(tables_detected)} tables, "
+                   f"analyzed {len(figures_enhanced)} figures")
+        
+        # Step 3: Combine full page texts
+        logger.info("  [3/5] Combining page texts...")
+        
+        page_texts = {}
+        for obj in text_objects:
+            page = obj.get('page', 1)
+            if page not in page_texts:
+                page_texts[page] = []
+            page_texts[page].append(obj['text'])
+        
+        full_text_objects = []
+        for page, texts in page_texts.items():
+            combined_text = "\n\n".join(texts)
+            if combined_text.strip():
+                full_text_objects.append({
+                    'type': 'text_chunk',
+                    'text': combined_text,
+                    'page': page,
+                    'bbox': None
+                })
+        
+        logger.info(f"  ✓ Combined into {len(full_text_objects)} full-page texts")
+        
+        # Step 4: Generate embeddings
+        logger.info("  [4/5] Generating embeddings...")
+        
+        kus_ready = []
+        
+        # Text chunks
+        for text_obj in full_text_objects:
+            chunks = self.embedder.embed_text_chunk(text_obj['text'])
+            for chunk_idx, chunk in enumerate(chunks):
+                kus_ready.append({
+                    'type': 'text_chunk',
+                    'page': text_obj['page'],
+                    'chunk_index': chunk_idx,
+                    'text': chunk['text_chunk'],
+                    'embedding_vector': chunk['vector'],
+                    'source_text': chunk['text_chunk'],
+                    'embedding_type': 'text',
+                    'enrichment': {}
+                })
+        
+        # Tables (already have enrichment from VLM)
+        for table in tables_detected:
+            try:
+                # Embed table
+                table_df = pd.DataFrame(table['data'])
+                table_text = table_df.to_markdown(index=False)
+                
+                embedding_data = self.embedder.embed_table(
+                    table_data=table['data'],
+                    caption=f"Table from page {table['page']}",
+                    summary=table_text[:500],
+                    table_image=None
+                )
+                
+                if embedding_data['vector']:
+                    kus_ready.append({
+                        'type': 'table',
+                        'page': table['page'],
+                        'bbox': table['bbox'],
+                        'data': table['data'],
+                        'caption': '',
+                        'enrichment': {
+                            'summary': table_text[:300],
+                            'keywords': table['headers'][:5],
+                            'extraction_method': 'vlm',
+                            'confidence': table['metadata']['confidence']
+                        },
+                        'embedding_vector': embedding_data['vector'],
+                        'source_text': embedding_data['source_text'],
+                        'embedding_type': 'text'
+                    })
+            except Exception as e:
+                logger.error(f"Failed to embed table: {e}")
+        
+        # Figures (already analyzed by VLM)
+        for figure in figures_enhanced:
+            try:
+                image = Image.open(io.BytesIO(figure['image_data']))
+                enrichment = figure.get('enrichment', {})
+                
+                embedding_data = self.embedder.embed_figure(
+                    image=image,
+                    caption=figure['caption'],
+                    summary=enrichment.get('summary', '')
+                )
+                
+                if embedding_data['vector']:
+                    kus_ready.append({
+                        'type': 'figure',
+                        'page': figure['page'],
+                        'figure_id': figure['figure_id'],
+                        'width': figure['width'],
+                        'height': figure['height'],
+                        'caption': figure['caption'],
+                        'enrichment': enrichment,
+                        'embedding_vector': embedding_data['vector'],
+                        'source_text': embedding_data['source_text'],
+                        'embedding_type': 'multimodal'
+                    })
+            except Exception as e:
+                logger.error(f"Failed to embed figure: {e}")
+        
+        logger.info(f"  ✓ Generated embeddings for {len(kus_ready)} KUs")
+        logger.info(f"    - Text chunks: {sum(1 for k in kus_ready if k['type'] == 'text_chunk')}")
+        logger.info(f"    - Tables: {sum(1 for k in kus_ready if k['type'] == 'table')}")
+        logger.info(f"    - Figures: {sum(1 for k in kus_ready if k['type'] == 'figure')}")
+        
+        # Step 5: Create Knowledge Units
+        logger.info("  [5/5] Finalizing Knowledge Units...")
+        
+        final_kus = self._create_knowledge_units(
+            kus_ready, source_id, "pdf", source_uri
+        )
+        
+        return final_kus
+    
+    async def _process_pdf_old(
         self,
         pdf_path: str,
         source_id: ObjectId,
@@ -288,6 +475,19 @@ class OptimizedPipeline:
         )
         
         return final_kus
+    
+    async def _process_pdf_optimized(
+        self,
+        pdf_path: str,
+        source_id: ObjectId,
+        source_uri: str
+    ) -> List[Dict]:
+        """Route to VLM or fallback processing"""
+        if self.use_vlm_extraction:
+            return await self._process_pdf_with_vlm(pdf_path, source_id, source_uri)
+        else:
+            # Fallback to old method (for testing)
+            return await self._process_pdf_old(pdf_path, source_id, source_uri)
     
     async def _process_youtube(
         self,

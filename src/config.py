@@ -40,14 +40,37 @@ class VoyageConfig(BaseModel):
 
 
 class GeminiConfig(BaseModel):
-    """Google Gemini configuration"""
+    """Gemini configuration with vision support"""
     api_key: str = Field(..., description="Gemini API key")
-    model_name: str = Field(default="gemini-2.5-flash")
+    
+    # Model selection
+    text_model: str = Field(
+        default="gemini-2.0-flash-exp",
+        description="Model for text synthesis"
+    )
+    vision_model: str = Field(
+        default="gemini-2.0-flash-exp",
+        description="Model for vision tasks (layout, tables, figures)"
+    )
+    pro_model: str = Field(
+        default="gemini-2.5-pro",
+        description="Model for complex reasoning (optional)"
+    )
+    
+    # Generation settings
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=8192)
-
+    
+    # Vision-specific settings
+    vision_temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Low temperature for structured extraction"
+    )
+    
     class Config:
-        protected_namespaces = () 
+        protected_namespaces = ()
     
     @field_validator('api_key')
     @classmethod
@@ -56,12 +79,38 @@ class GeminiConfig(BaseModel):
             raise ValueError("Invalid Gemini API key")
         return v
 
+
 class ProcessingConfig(BaseModel):
     """Pipeline processing configuration"""
     max_workers: int = Field(default=4, ge=1, le=32)
     batch_size: int = Field(default=16, ge=1, le=128)
-    use_layoutparser: bool = Field(default=False)
-    whisper_model: Literal["tiny", "base", "small", "medium", "large"] = Field(default="base")
+    
+    # VLM extraction (replaces LayoutParser)
+    use_vlm_extraction: bool = Field(
+        default=True,
+        description="Use VLM for layout detection and table extraction"
+    )
+    vlm_for_tables: bool = Field(
+        default=True,
+        description="Use VLM for table extraction (more accurate)"
+    )
+    vlm_for_figures: bool = Field(
+        default=True,
+        description="Use VLM for figure analysis"
+    )
+    
+    # Fallback settings
+    enable_fallback_extraction: bool = Field(
+        default=True,
+        description="Use basic extraction if VLM fails"
+    )
+    
+    # Video/audio
+    whisper_model: Literal["tiny", "base", "small", "medium", "large"] = Field(
+        default="base"
+    )
+    
+    # Other
     max_concurrent_enrichment: int = Field(default=10, ge=1, le=50)
 
 

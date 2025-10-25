@@ -2,10 +2,11 @@
 src/extraction/utils.py
 """
 import os, tempfile
-os.environ["FVCORE_CACHE"] = os.path.join(tempfile.gettempdir(), "fvcore_cache")
+# os.environ["FVCORE_CACHE"] = os.path.join(tempfile.gettempdir(), "fvcore_cache")
  
 import io
 import requests
+from src.enrichment.schema import LayoutDetectionOutput, TableExtractionOutput, FigureAnalysisOutput, BoundingBox
 import trafilatura
 import os
 import sys
@@ -27,12 +28,12 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-try:
-    import layoutparser as lp
-    LAYOUTPARSER_AVAILABLE = True
-except ImportError:
-    LAYOUTPARSER_AVAILABLE = False
-    print(" LayoutParser not available. Install with: pip install layoutparser detectron2")
+# try:
+#     import layoutparser as lp
+#     LAYOUTPARSER_AVAILABLE = True
+# except ImportError:
+#     LAYOUTPARSER_AVAILABLE = False
+#     print(" LayoutParser not available. Install with: pip install layoutparser detectron2")
 
 _MODEL_CACHE: Dict[str, whisper.Whisper] = {}
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,326 +46,491 @@ except ImportError:
     logger.warning("youtube-transcript-api not installed. Install with: pip install youtube-transcript-api")
 
 
-class TableStructureReconstructor:
-    """Smart table structure reconstruction for multi-level headers"""
+# class TableStructureReconstructor:
+#     """Smart table structure reconstruction for multi-level headers"""
 
-    @staticmethod
-    def detect_header_rows(df: pd.DataFrame, max_header_rows: int = 5) -> int:
-        """Detect how many rows are headers (not data)"""
-        if len(df) < 2:
-            return 1
+#     @staticmethod
+#     def detect_header_rows(df: pd.DataFrame, max_header_rows: int = 5) -> int:
+#         """Detect how many rows are headers (not data)"""
+#         if len(df) < 2:
+#             return 1
 
-        header_count = 0
-        for i in range(min(max_header_rows, len(df))):
-            row = df.iloc[i]
-            row_str = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-            tokens = row_str.split()
-            if not tokens:
-                header_count += 1
-                continue
+#         header_count = 0
+#         for i in range(min(max_header_rows, len(df))):
+#             row = df.iloc[i]
+#             row_str = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
+#             tokens = row_str.split()
+#             if not tokens:
+#                 header_count += 1
+#                 continue
             
-            numeric_tokens = sum(1 for t in tokens if re.match(r'^[\d\.\,\%\±]+$', t))
-            text_tokens = len(tokens) - numeric_tokens
+#             numeric_tokens = sum(1 for t in tokens if re.match(r'^[\d\.\,\%\±]+$', t))
+#             text_tokens = len(tokens) - numeric_tokens
             
-            header_keywords = ['retrieval', 'caption', 'accuracy', 'score', 'model', 'method', 'task', 'dataset', 'metric']
-            has_keywords = any(kw in row_str.lower() for kw in header_keywords)
+#             header_keywords = ['retrieval', 'caption', 'accuracy', 'score', 'model', 'method', 'task', 'dataset', 'metric']
+#             has_keywords = any(kw in row_str.lower() for kw in header_keywords)
             
-            if text_tokens > numeric_tokens or has_keywords or numeric_tokens == 0:
-                header_count += 1
-            else:
-                break
+#             if text_tokens > numeric_tokens or has_keywords or numeric_tokens == 0:
+#                 header_count += 1
+#             else:
+#                 break
         
-        return max(1, header_count)
+#         return max(1, header_count)
 
-    @staticmethod
-    def clean_noise_rows(df: pd.DataFrame, caption: str = "") -> pd.DataFrame:
-        """Remove noise rows (captions, empty rows)"""
-        cleaned_rows = []
-        for _, row in df.iterrows():
-            row_text = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-            if caption and len(caption) > 20:
-                caption_words = set(caption.lower().split()[:10])
-                row_words = set(row_text.lower().split())
-                if len(caption_words & row_words) > len(caption_words) * 0.5:
-                    continue
+#     @staticmethod
+#     def clean_noise_rows(df: pd.DataFrame, caption: str = "") -> pd.DataFrame:
+#         """Remove noise rows (captions, empty rows)"""
+#         cleaned_rows = []
+#         for _, row in df.iterrows():
+#             row_text = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
+#             if caption and len(caption) > 20:
+#                 caption_words = set(caption.lower().split()[:10])
+#                 row_words = set(row_text.lower().split())
+#                 if len(caption_words & row_words) > len(caption_words) * 0.5:
+#                     continue
             
-            non_empty = sum(1 for x in row if pd.notna(x) and str(x).strip())
-            if non_empty < len(row) * 0.3:
-                continue
+#             non_empty = sum(1 for x in row if pd.notna(x) and str(x).strip())
+#             if non_empty < len(row) * 0.3:
+#                 continue
             
-            if re.search(r'Table\s+\d+[\.:]?\s+', row_text, re.IGNORECASE):
-                continue
+#             if re.search(r'Table\s+\d+[\.:]?\s+', row_text, re.IGNORECASE):
+#                 continue
             
-            cleaned_rows.append(row)
+#             cleaned_rows.append(row)
         
-        return pd.DataFrame(cleaned_rows).reset_index(drop=True) if cleaned_rows else pd.DataFrame()
+#         return pd.DataFrame(cleaned_rows).reset_index(drop=True) if cleaned_rows else pd.DataFrame()
 
-    @staticmethod
-    def reconstruct_hierarchical_headers(df: pd.DataFrame, header_rows: int) -> List[str]:
-        """Reconstruct column names from multi-level headers"""
-        if header_rows <= 1:
-            return [str(x) if pd.notna(x) else f"col_{i}" for i, x in enumerate(df.iloc[0])]
+#     @staticmethod
+#     def reconstruct_hierarchical_headers(df: pd.DataFrame, header_rows: int) -> List[str]:
+#         """Reconstruct column names from multi-level headers"""
+#         if header_rows <= 1:
+#             return [str(x) if pd.notna(x) else f"col_{i}" for i, x in enumerate(df.iloc[0])]
         
-        header_matrix = [[str(x).strip() if pd.notna(x) and str(x).strip() else "" for x in df.iloc[i]] for i in range(header_rows)]
-        num_cols = len(header_matrix[0])
+#         header_matrix = [[str(x).strip() if pd.notna(x) and str(x).strip() else "" for x in df.iloc[i]] for i in range(header_rows)]
+#         num_cols = len(header_matrix[0])
         
-        for row_idx in range(len(header_matrix)):
-            current_value = ""
-            for col_idx in range(num_cols):
-                if header_matrix[row_idx][col_idx]:
-                    current_value = header_matrix[row_idx][col_idx]
-                else:
-                    header_matrix[row_idx][col_idx] = current_value
+#         for row_idx in range(len(header_matrix)):
+#             current_value = ""
+#             for col_idx in range(num_cols):
+#                 if header_matrix[row_idx][col_idx]:
+#                     current_value = header_matrix[row_idx][col_idx]
+#                 else:
+#                     header_matrix[row_idx][col_idx] = current_value
         
-        final_headers = []
-        for col_idx in range(num_cols):
-            parts = [header_matrix[row_idx][col_idx] for row_idx in range(len(header_matrix))]
-            unique_parts = []
-            for part in parts:
-                if part and part not in unique_parts:
-                    unique_parts.append(part)
+#         final_headers = []
+#         for col_idx in range(num_cols):
+#             parts = [header_matrix[row_idx][col_idx] for row_idx in range(len(header_matrix))]
+#             unique_parts = []
+#             for part in parts:
+#                 if part and part not in unique_parts:
+#                     unique_parts.append(part)
             
-            final_headers.append("_".join(unique_parts) if unique_parts else f"col_{col_idx}")
+#             final_headers.append("_".join(unique_parts) if unique_parts else f"col_{col_idx}")
         
-        return final_headers
+#         return final_headers
 
-    @staticmethod
-    def process_table(df: pd.DataFrame, caption: str = "") -> Optional[Dict]:
-        """Complete table processing pipeline"""
-        df = TableStructureReconstructor.clean_noise_rows(df, caption)
-        if df.empty or len(df) < 2:
-            return None
+#     @staticmethod
+#     def process_table(df: pd.DataFrame, caption: str = "") -> Optional[Dict]:
+#         """Complete table processing pipeline"""
+#         df = TableStructureReconstructor.clean_noise_rows(df, caption)
+#         if df.empty or len(df) < 2:
+#             return None
         
-        header_rows = TableStructureReconstructor.detect_header_rows(df)
-        column_names = TableStructureReconstructor.reconstruct_hierarchical_headers(df, header_rows)
+#         header_rows = TableStructureReconstructor.detect_header_rows(df)
+#         column_names = TableStructureReconstructor.reconstruct_hierarchical_headers(df, header_rows)
         
-        data_df = df.iloc[header_rows:].reset_index(drop=True)
-        data_df.columns = column_names[:len(data_df.columns)]
-        data_df = data_df.fillna("").astype(str)
-        data_df = data_df[data_df.apply(lambda x: x.str.strip().str.len().sum(), axis=1) > 0]
+#         data_df = df.iloc[header_rows:].reset_index(drop=True)
+#         data_df.columns = column_names[:len(data_df.columns)]
+#         data_df = data_df.fillna("").astype(str)
+#         data_df = data_df[data_df.apply(lambda x: x.str.strip().str.len().sum(), axis=1) > 0]
         
-        if data_df.empty:
-            return None
+#         if data_df.empty:
+#             return None
         
-        return {
-            "headers": column_names,
-            "rows": data_df.values.tolist(),
-            "data": data_df.to_dict(orient='records'),
-            "shape": {"rows": len(data_df), "columns": len(data_df.columns)},
-            "metadata": {"header_rows_detected": header_rows, "has_hierarchical_headers": header_rows > 1}
-        }
+#         return {
+#             "headers": column_names,
+#             "rows": data_df.values.tolist(),
+#             "data": data_df.to_dict(orient='records'),
+#             "shape": {"rows": len(data_df), "columns": len(data_df.columns)},
+#             "metadata": {"header_rows_detected": header_rows, "has_hierarchical_headers": header_rows > 1}
+#         }
 
 
 class PDFUtils:
     """PDF utilities with complete Windows LayoutParser fix"""
     
-    _layout_model = None
+    # _layout_model = None
     _init_attempted = False
-
     @staticmethod
-    def _sanitize_windows_path(path_str: str) -> str:
+    async def detect_layout_with_vlm(
+        page: fitz.Page,
+        vlm_client,
+        page_num: int
+    ) -> Optional[LayoutDetectionOutput]:
         """
-        Sanitize path by removing Windows-illegal characters
-        Fixes: 'config.yml?dl=1.lock' → 'config_dl1.lock'
-        """
-        # Remove/replace illegal Windows filename characters
-        illegal_chars = ['?', '<', '>', ':', '"', '|', '*']
-        sanitized = path_str
-        
-        for char in illegal_chars:
-            sanitized = sanitized.replace(char, '_')
-        
-        # Also handle URL query strings
-        if '?' in sanitized or '&' in sanitized:
-            sanitized = re.sub(r'[?&=]', '_', sanitized)
-        
-        return sanitized
-
-    @staticmethod
-    def _patch_fvcore_cache():
-        """
-        Monkey-patch fvcore's PathManager to handle Windows paths
-        This fixes the 'Invalid argument' error on Windows
+        VLM-based layout detection (replaces LayoutParser)
         """
         try:
-            from fvcore.common.file_io import PathManager
-            from iopath.common.file_io import HTTPURLHandler
-            
-            # Store original _get_local_path
-            original_get_local_path = HTTPURLHandler._get_local_path
-            
-            def patched_get_local_path(self, path, **kwargs):
-                """Patched version that sanitizes paths for Windows"""
-                local_path = original_get_local_path(self, path, **kwargs)
-                
-                if sys.platform == "win32" and local_path:
-                    # Sanitize the path
-                    parts = list(Path(local_path).parts)
-                    sanitized_parts = [PDFUtils._sanitize_windows_path(p) for p in parts]
-                    local_path = str(Path(*sanitized_parts))
-                
-                return local_path
-            
-            # Apply patch
-            HTTPURLHandler._get_local_path = patched_get_local_path
-            logger.info(" Applied fvcore Windows path patch")
-            return True
-            
-        except Exception as e:
-            logger.warning(f"Could not patch fvcore: {e}")
-            return False
-
-    @staticmethod
-    def initialize_layoutparser_model():
-        """
-        Initialize LayoutParser with complete Windows fix
-        """
-        global LAYOUTPARSER_AVAILABLE
-        
-        if not LAYOUTPARSER_AVAILABLE:
-            logger.warning("LayoutParser module not available")
-            return False
-        
-        if PDFUtils._layout_model:
-            logger.info("LayoutParser model already loaded")
-            return True
-        
-        if PDFUtils._init_attempted:
-            logger.warning("LayoutParser initialization already failed")
-            return False
-        
-        PDFUtils._init_attempted = True
-        
-        try:
-            logger.info(" Initializing LayoutParser model...")
-            
-            # Check detectron2
-            try:
-                import detectron2
-                logger.info("✅ Detectron2 available")
-            except ImportError:
-                logger.error(" Detectron2 not found!")
-                logger.error("Install: pip install 'git+https://github.com/facebookresearch/detectron2.git'")
-                LAYOUTPARSER_AVAILABLE = False
-                return False
-            
-            # Windows-specific fixes
-            if sys.platform == "win32":
-                logger.info("   Windows detected - Applying fixes...")
-                
-                # Fix 1: Set simple cache directory
-                cache_dir = Path.home() / ".layoutparser_cache"
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Fix 2: Override torch cache locations
-                torch_cache = cache_dir / "torch"
-                torch_cache.mkdir(exist_ok=True)
-                
-                os.environ['TORCH_HOME'] = str(torch_cache)
-                os.environ['FVCORE_CACHE'] = str(cache_dir / "fvcore")
-                
-                # Fix 3: Patch fvcore to handle URL query strings
-                PDFUtils._patch_fvcore_cache()
-                
-                logger.info(f"   Cache directory: {cache_dir}")
-            
-            # Initialize model with timeout
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Model initialization timeout")
-            
-            # Only set alarm on Unix systems (Windows doesn't support SIGALRM)
-            if hasattr(signal, 'SIGALRM'):
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(120)  # 2 minutes timeout
-            
-            try:
-                logger.info("   Downloading model (first time only)...")
-                PDFUtils._layout_model = lp.Detectron2LayoutModel(
-                    'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
-                    extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
-                    label_map={
-                        0: "Text", 
-                        1: "Title", 
-                        2: "List", 
-                        3: "Table", 
-                        4: "Figure"
-                    }
-                )
-                
-                if hasattr(signal, 'SIGALRM'):
-                    signal.alarm(0)  # Cancel timeout
-                
-                logger.info(" LayoutParser model loaded successfully")
-                return True
-                
-            except TimeoutError:
-                if hasattr(signal, 'SIGALRM'):
-                    signal.alarm(0)
-                logger.error(" Model initialization timeout (>2min)")
-                raise
-            
-        except Exception as e:
-            logger.error(f" LayoutParser initialization failed: {type(e).__name__}: {e}")
-            logger.error(f"   Error details: {str(e)}")
-            
-            # Provide helpful error messages
-            if "Invalid argument" in str(e):
-                logger.error("   → This is a Windows path issue with fvcore")
-                logger.error("   → Workaround: Set USE_LAYOUTPARSER=false in .env")
-            elif "connection" in str(e).lower() or "download" in str(e).lower():
-                logger.error("   → Model download failed (network issue)")
-                logger.error("   → Try again with better internet connection")
-            else:
-                logger.error("   → Unknown error, disabling LayoutParser")
-            
-            logger.warning("Falling back to basic extraction without layout detection")
-            LAYOUTPARSER_AVAILABLE = False
-            return False
-
-    @staticmethod
-    def detect_layout_regions(page):
-        """Detect layout regions using LayoutParser"""
-        if not LAYOUTPARSER_AVAILABLE or not PDFUtils._layout_model:
-            return None
-        
-        try:
-            # Convert page to image
-            pix = page.get_pixmap(dpi=150)
+            # Convert to high-res image
+            pix = page.get_pixmap(dpi=200)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
-            # Detect layout
-            layout = PDFUtils._layout_model.detect(img)
+            prompt = f"""Analyze page {page_num + 1} layout.
+
+Detect all regions with precise bounding boxes:
+- Tables (structured data in rows/columns)
+- Figures (charts, diagrams, images)
+- Text blocks (paragraphs, sections)
+- Titles/headings
+- Lists
+
+Provide pixel coordinates relative to image dimensions: {pix.width}×{pix.height}"""
             
-            # Organize by type
-            regions = {
-                'text': [],
-                'tables': [],
-                'figures': []
-            }
+            result = await vlm_client.create_structured_completion(
+                prompt=prompt,
+                response_model=LayoutDetectionOutput,
+                image=img
+            )
             
-            for block in layout:
-                label = block.type.lower()
-                bbox = [block.block.x_1, block.block.y_1, 
-                       block.block.x_2, block.block.y_2]
-                
-                if label in ['text', 'title', 'list']:
-                    regions['text'].append(bbox)
-                elif label == 'table':
-                    regions['tables'].append(bbox)
-                elif label == 'figure':
-                    regions['figures'].append(bbox)
+            if result:
+                logger.info(f"Page {page_num + 1}: VLM detected "
+                          f"{len(result.regions)} regions")
             
-            logger.info(f"Detected: {len(regions['text'])} text, "
-                       f"{len(regions['tables'])} tables, "
-                       f"{len(regions['figures'])} figures")
-            
-            return regions
+            return result
             
         except Exception as e:
-            logger.error(f"Layout detection failed: {e}")
+            logger.error(f"VLM layout detection failed: {e}")
             return None
+    
+    @staticmethod
+    async def extract_table_with_vlm(
+        page: fitz.Page,
+        table_bbox: BoundingBox,
+        vlm_client,
+        page_num: int
+    ) -> Optional[Dict]:
+        """
+        VLM-based table extraction (replaces Camelot/pdfplumber)
+        """
+        try:
+            # Crop table region with padding
+            padding = 10
+            crop_rect = fitz.Rect(
+                table_bbox.x1 - padding,
+                table_bbox.y1 - padding,
+                table_bbox.x2 + padding,
+                table_bbox.y2 + padding
+            )
+            
+            pix = page.get_pixmap(dpi=300, clip=crop_rect)
+            table_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            prompt = """Extract this table's complete structure.
+
+Critical requirements:
+1. Identify ALL column headers (handle multi-level if present)
+2. Extract ALL data rows accurately
+3. Preserve numerical values exactly
+4. Note any merged cells or special formatting
+
+Return precise structured data."""
+            
+            result = await vlm_client.create_structured_completion(
+                prompt=prompt,
+                response_model=TableExtractionOutput,
+                image=table_img
+            )
+            
+            if result:
+                logger.info(f"Page {page_num + 1}: Extracted table "
+                          f"({result.num_rows}×{result.num_cols})")
+                
+                return {
+                    "type": "table",
+                    "page": page_num + 1,
+                    "bbox": [table_bbox.x1, table_bbox.y1, 
+                            table_bbox.x2, table_bbox.y2],
+                    "headers": result.headers,
+                    "rows": result.rows,
+                    "data": result.to_dataframe().to_dict(orient='records'),
+                    "metadata": {
+                        "extraction_method": "vlm",
+                        "confidence": result.extraction_confidence,
+                        "has_merged_cells": result.has_merged_cells
+                    }
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"VLM table extraction failed: {e}")
+            return None
+    
+    @staticmethod
+    async def analyze_figure_with_vlm(
+        image_data: bytes,
+        caption: str,
+        vlm_client,
+        page_num: int,
+        figure_id: str
+    ) -> Optional[Dict]:
+        """
+        Deep figure analysis with VLM
+        """
+        try:
+            img = Image.open(io.BytesIO(image_data))
+            
+            prompt = f"""Analyze this research figure from page {page_num + 1}.
+
+Caption: {caption}
+
+Provide comprehensive analysis:
+1. Identify figure type (chart type, diagram type, etc.)
+2. Extract key findings and trends shown
+3. Detect any numerical values, labels, legends
+4. Explain research relevance and insights
+
+Focus on information useful for R&D literature review."""
+            
+            result = await vlm_client.create_structured_completion(
+                prompt=prompt,
+                response_model=FigureAnalysisOutput,
+                image=img
+            )
+            
+            if result:
+                logger.info(f"Page {page_num + 1}: Analyzed figure "
+                          f"({result.figure_type})")
+                
+                return {
+                    "type": "figure",
+                    "page": page_num + 1,
+                    "figure_id": figure_id,
+                    "image_data": image_data,
+                    "width": img.width,
+                    "height": img.height,
+                    "caption": caption,
+                    "enrichment": {
+                        "summary": f"{result.figure_type}: {result.relevance_to_research}",
+                        "keywords": result.labels_detected[:10],
+                        "analysis": {
+                            "figure_type": result.figure_type,
+                            "key_findings": result.key_findings,
+                            "numerical_data": [nd.model_dump() for nd in result.numerical_data],
+                            "confidence": result.extraction_confidence
+                        }
+                    }
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"VLM figure analysis failed: {e}")
+            return None
+    # @staticmethod
+    # def _sanitize_windows_path(path_str: str) -> str:
+    #     """
+    #     Sanitize path by removing Windows-illegal characters
+    #     Fixes: 'config.yml?dl=1.lock' → 'config_dl1.lock'
+    #     """
+    #     # Remove/replace illegal Windows filename characters
+    #     illegal_chars = ['?', '<', '>', ':', '"', '|', '*']
+    #     sanitized = path_str
+        
+    #     for char in illegal_chars:
+    #         sanitized = sanitized.replace(char, '_')
+        
+    #     # Also handle URL query strings
+    #     if '?' in sanitized or '&' in sanitized:
+    #         sanitized = re.sub(r'[?&=]', '_', sanitized)
+        
+    #     return sanitized
+
+    # @staticmethod
+    # def _patch_fvcore_cache():
+    #     """
+    #     Monkey-patch fvcore's PathManager to handle Windows paths
+    #     This fixes the 'Invalid argument' error on Windows
+    #     """
+    #     try:
+    #         from fvcore.common.file_io import PathManager
+    #         from iopath.common.file_io import HTTPURLHandler
+            
+    #         # Store original _get_local_path
+    #         original_get_local_path = HTTPURLHandler._get_local_path
+            
+    #         def patched_get_local_path(self, path, **kwargs):
+    #             """Patched version that sanitizes paths for Windows"""
+    #             local_path = original_get_local_path(self, path, **kwargs)
+                
+    #             if sys.platform == "win32" and local_path:
+    #                 # Sanitize the path
+    #                 parts = list(Path(local_path).parts)
+    #                 sanitized_parts = [PDFUtils._sanitize_windows_path(p) for p in parts]
+    #                 local_path = str(Path(*sanitized_parts))
+                
+    #             return local_path
+            
+    #         # Apply patch
+    #         HTTPURLHandler._get_local_path = patched_get_local_path
+    #         logger.info(" Applied fvcore Windows path patch")
+    #         return True
+            
+    #     except Exception as e:
+    #         logger.warning(f"Could not patch fvcore: {e}")
+    #         return False
+
+    # @staticmethod
+    # def initialize_layoutparser_model():
+    #     """
+    #     Initialize LayoutParser with complete Windows fix
+    #     """
+    #     global LAYOUTPARSER_AVAILABLE
+        
+    #     if not LAYOUTPARSER_AVAILABLE:
+    #         logger.warning("LayoutParser module not available")
+    #         return False
+        
+    #     if PDFUtils._layout_model:
+    #         logger.info("LayoutParser model already loaded")
+    #         return True
+        
+    #     if PDFUtils._init_attempted:
+    #         logger.warning("LayoutParser initialization already failed")
+    #         return False
+        
+    #     PDFUtils._init_attempted = True
+        
+    #     try:
+    #         logger.info(" Initializing LayoutParser model...")
+            
+    #         # Check detectron2
+    #         try:
+    #             import detectron2
+    #             logger.info("✅ Detectron2 available")
+    #         except ImportError:
+    #             logger.error(" Detectron2 not found!")
+    #             logger.error("Install: pip install 'git+https://github.com/facebookresearch/detectron2.git'")
+    #             LAYOUTPARSER_AVAILABLE = False
+    #             return False
+            
+    #         # Windows-specific fixes
+    #         if sys.platform == "win32":
+    #             logger.info("   Windows detected - Applying fixes...")
+                
+    #             # Fix 1: Set simple cache directory
+    #             cache_dir = Path.home() / ".layoutparser_cache"
+    #             cache_dir.mkdir(parents=True, exist_ok=True)
+                
+    #             # Fix 2: Override torch cache locations
+    #             torch_cache = cache_dir / "torch"
+    #             torch_cache.mkdir(exist_ok=True)
+                
+    #             os.environ['TORCH_HOME'] = str(torch_cache)
+    #             os.environ['FVCORE_CACHE'] = str(cache_dir / "fvcore")
+                
+    #             # Fix 3: Patch fvcore to handle URL query strings
+    #             PDFUtils._patch_fvcore_cache()
+                
+    #             logger.info(f"   Cache directory: {cache_dir}")
+            
+    #         # Initialize model with timeout
+    #         import signal
+            
+    #         def timeout_handler(signum, frame):
+    #             raise TimeoutError("Model initialization timeout")
+            
+    #         # Only set alarm on Unix systems (Windows doesn't support SIGALRM)
+    #         if hasattr(signal, 'SIGALRM'):
+    #             signal.signal(signal.SIGALRM, timeout_handler)
+    #             signal.alarm(120)  # 2 minutes timeout
+            
+    #         try:
+    #             logger.info("   Downloading model (first time only)...")
+    #             PDFUtils._layout_model = lp.Detectron2LayoutModel(
+    #                 'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
+    #                 extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", 0.7],
+    #                 label_map={
+    #                     0: "Text", 
+    #                     1: "Title", 
+    #                     2: "List", 
+    #                     3: "Table", 
+    #                     4: "Figure"
+    #                 }
+    #             )
+                
+    #             if hasattr(signal, 'SIGALRM'):
+    #                 signal.alarm(0)  # Cancel timeout
+                
+    #             logger.info(" LayoutParser model loaded successfully")
+    #             return True
+                
+    #         except TimeoutError:
+    #             if hasattr(signal, 'SIGALRM'):
+    #                 signal.alarm(0)
+    #             logger.error(" Model initialization timeout (>2min)")
+    #             raise
+            
+    #     except Exception as e:
+    #         logger.error(f" LayoutParser initialization failed: {type(e).__name__}: {e}")
+    #         logger.error(f"   Error details: {str(e)}")
+            
+    #         # Provide helpful error messages
+    #         if "Invalid argument" in str(e):
+    #             logger.error("   → This is a Windows path issue with fvcore")
+    #             logger.error("   → Workaround: Set USE_LAYOUTPARSER=false in .env")
+    #         elif "connection" in str(e).lower() or "download" in str(e).lower():
+    #             logger.error("   → Model download failed (network issue)")
+    #             logger.error("   → Try again with better internet connection")
+    #         else:
+    #             logger.error("   → Unknown error, disabling LayoutParser")
+            
+    #         logger.warning("Falling back to basic extraction without layout detection")
+    #         LAYOUTPARSER_AVAILABLE = False
+    #         return False
+
+    # @staticmethod
+    # def detect_layout_regions(page):
+    #     """Detect layout regions using LayoutParser"""
+    #     if not LAYOUTPARSER_AVAILABLE or not PDFUtils._layout_model:
+    #         return None
+        
+    #     try:
+    #         # Convert page to image
+    #         pix = page.get_pixmap(dpi=150)
+    #         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+    #         # Detect layout
+    #         layout = PDFUtils._layout_model.detect(img)
+            
+    #         # Organize by type
+    #         regions = {
+    #             'text': [],
+    #             'tables': [],
+    #             'figures': []
+    #         }
+            
+    #         for block in layout:
+    #             label = block.type.lower()
+    #             bbox = [block.block.x_1, block.block.y_1, 
+    #                    block.block.x_2, block.block.y_2]
+                
+    #             if label in ['text', 'title', 'list']:
+    #                 regions['text'].append(bbox)
+    #             elif label == 'table':
+    #                 regions['tables'].append(bbox)
+    #             elif label == 'figure':
+    #                 regions['figures'].append(bbox)
+            
+    #         logger.info(f"Detected: {len(regions['text'])} text, "
+    #                    f"{len(regions['tables'])} tables, "
+    #                    f"{len(regions['figures'])} figures")
+            
+    #         return regions
+            
+    #     except Exception as e:
+    #         logger.error(f"Layout detection failed: {e}")
+    #         return None
         
     @staticmethod
     def extract_all_text_optimized(page: fitz.Page, min_length: int = 50) -> str:
@@ -402,7 +568,6 @@ class PDFUtils:
             logger.error(f"Failed to extract text from page {page.number + 1}: {e}")
             return ""
 
-    @staticmethod
     @staticmethod
     def extract_images_improved(
         page: fitz.Page, 

@@ -18,68 +18,100 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+# def _process_page_worker(args: tuple) -> List[Dict]:
+#     """
+#     Worker xử lý một trang PDF.
+#     Nó gọi các hàm từ PDFUtils để thực hiện công việc trích xuất.
+#     """
+#     pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag, use_layoutparser = args
+#     extracted_data = []
+    
+#     try:
+#         doc = fitz.open(pdf_path)
+#         page = doc.load_page(page_num)
+
+#         # Nếu LayoutParser được bật, phát hiện các vùng trước tiên
+#         layout_blocks = None
+#         if use_layoutparser and LAYOUTPARSER_AVAILABLE:
+#             layout_blocks = PDFUtils.detect_layout_regions(page)
+
+#         # 1. Trích xuất dựa trên bố cục nếu có
+#         if layout_blocks:
+#             # Trích xuất văn bản từ các vùng không phải là bảng/hình
+#             extracted_data.extend(
+#                 PDFUtils.extract_text_with_layout(page, page_num, min_text_length, layout_blocks)
+#             )
+#             # Trích xuất bảng từ các vùng đã phát hiện
+#             if extract_tables_flag and layout_blocks['tables']:
+#                 for table_bbox in layout_blocks['tables']:
+#                     extracted_data.extend(
+#                         PDFUtils.extract_table_from_bbox(page, page_num, pdf_path, table_bbox)
+#                     )
+#             # Trích xuất hình ảnh từ các vùng đã phát hiện
+#             if extract_images_flag and layout_blocks['figures']:
+#                  for fig_bbox in layout_blocks['figures']:
+#                     extracted_data.extend(
+#                         PDFUtils.extract_figure_from_bbox(page, page_num, fig_bbox)
+#                     )
+        
+#         # 2. Trích xuất thông thường nếu không dùng LayoutParser
+#         else:
+#             extracted_data.extend(
+#                 PDFUtils.extract_text_blocks(page, page_num, min_text_length)
+#             )
+#             if extract_tables_flag:
+#                 extracted_data.extend(
+#                     PDFUtils.extract_tables(page, page_num, pdf_path=pdf_path, use_layoutparser=False)
+#                 )
+#             if extract_images_flag:
+#                 extracted_data.extend(
+#                     PDFUtils.extract_images(page, page_num)
+#                 )
+            
+#         doc.close()
+        
+#     except Exception as e:
+#         logger.error(f"Error processing page {page_num} of {pdf_path}: {e}")
+        
+#     return extracted_data
 def _process_page_worker(args: tuple) -> List[Dict]:
     """
-    Worker xử lý một trang PDF.
-    Nó gọi các hàm từ PDFUtils để thực hiện công việc trích xuất.
+    SIMPLIFIED: VLM-based processing (no LayoutParser)
     """
-    pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag, use_layoutparser = args
+    pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag, vlm_config = args
     extracted_data = []
     
     try:
         doc = fitz.open(pdf_path)
         page = doc.load_page(page_num)
-
-        # Nếu LayoutParser được bật, phát hiện các vùng trước tiên
-        layout_blocks = None
-        if use_layoutparser and LAYOUTPARSER_AVAILABLE:
-            layout_blocks = PDFUtils.detect_layout_regions(page)
-
-        # 1. Trích xuất dựa trên bố cục nếu có
-        if layout_blocks:
-            # Trích xuất văn bản từ các vùng không phải là bảng/hình
-            extracted_data.extend(
-                PDFUtils.extract_text_with_layout(page, page_num, min_text_length, layout_blocks)
-            )
-            # Trích xuất bảng từ các vùng đã phát hiện
-            if extract_tables_flag and layout_blocks['tables']:
-                for table_bbox in layout_blocks['tables']:
-                    extracted_data.extend(
-                        PDFUtils.extract_table_from_bbox(page, page_num, pdf_path, table_bbox)
-                    )
-            # Trích xuất hình ảnh từ các vùng đã phát hiện
-            if extract_images_flag and layout_blocks['figures']:
-                 for fig_bbox in layout_blocks['figures']:
-                    extracted_data.extend(
-                        PDFUtils.extract_figure_from_bbox(page, page_num, fig_bbox)
-                    )
         
-        # 2. Trích xuất thông thường nếu không dùng LayoutParser
-        else:
+        # 1. Extract full text (always)
+        full_text = PDFUtils.extract_all_text_optimized(page, min_text_length)
+        if full_text:
+            extracted_data.append({
+                'type': 'text_chunk',
+                'text': full_text,
+                'page': page_num + 1,
+                'bbox': list(page.rect)
+            })
+        
+        # 2. VLM layout detection (async, handled separately)
+        # This is now done in async pipeline
+        
+        # 3. Extract images
+        if extract_images_flag:
             extracted_data.extend(
-                PDFUtils.extract_text_blocks(page, page_num, min_text_length)
+                PDFUtils.extract_images_improved(page, page_num)
             )
-            if extract_tables_flag:
-                extracted_data.extend(
-                    PDFUtils.extract_tables(page, page_num, pdf_path=pdf_path, use_layoutparser=False)
-                )
-            if extract_images_flag:
-                extracted_data.extend(
-                    PDFUtils.extract_images(page, page_num)
-                )
-            
+        
         doc.close()
         
     except Exception as e:
-        logger.error(f"Error processing page {page_num} of {pdf_path}: {e}")
-        
+        logger.error(f"Error processing page {page_num}: {e}")
+    
     return extracted_data
 
-
 class PDFExtractor:
-    """
-    Unified extractor supporting parallel and asynchronous operations.
-    """
     def __init__(
         self, 
         min_text_length: int = 50, 
@@ -87,41 +119,35 @@ class PDFExtractor:
         extract_tables: bool = True,
         max_workers: Optional[int] = None,
         output_dir: Optional[str] = None,
-        use_layoutparser: bool = False
+        use_vlm: bool = True  # NEW: replace use_layoutparser
     ):
         self.min_text_length = min_text_length
         self.extract_images = extract_images
         self.extract_tables = extract_tables
         self.executor = ProcessPoolExecutor(max_workers=max_workers)
         self.output_dir = Path(output_dir) if output_dir else None
-        
-        self.use_layoutparser = use_layoutparser and LAYOUTPARSER_AVAILABLE
-        
-        if self.use_layoutparser:
-            logger.info("🔧 LayoutParser enabled - Initializing model...")
-            # Khởi tạo mô hình trong tiến trình chính để các worker có thể kế thừa
-            PDFUtils.initialize_layoutparser_model()
-        elif use_layoutparser and not LAYOUTPARSER_AVAILABLE:
-            logger.warning("⚠️  LayoutParser requested but not available.")
+        self.use_vlm = use_vlm
         
         if self.output_dir:
             self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"PDFExtractor initialized (VLM: {use_vlm})")
 
     def extract_parallel(self, pdf_path: str) -> List[Dict]:
         """
         Processes a single PDF in parallel using a pool of processes.
         """
         logger.info(f"Starting parallel extraction for: {pdf_path}")
-        if self.use_layoutparser:
-            logger.info("  🔍 Using LayoutParser for table/figure detection")
-        
+        if self.use_vlm:
+            logger.info("  🔍 Using VLM for layout detection")
+
         try:
             with fitz.open(pdf_path) as doc:
                 num_pages = len(doc)
             
             tasks = [
                 (pdf_path, i, self.min_text_length, self.extract_images, 
-                 self.extract_tables, self.use_layoutparser) 
+                 self.extract_tables, self.use_vlm) 
                 for i in range(num_pages)
             ]
             
