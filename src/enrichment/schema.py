@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 class BoundingBox(BaseModel):
@@ -100,8 +100,8 @@ class ResearchMetadata(BaseModel):
         description="Key contributions in this section"
     )
 
-class EnhancedEnrichmentOutput(BaseModel):
-    """Enhanced enrichment with research metadata"""
+class EnrichmentOutput(BaseModel):
+    """Enrichment with research metadata"""
     summary: str = Field(min_length=20, max_length=500)
     keywords: List[str] = Field(min_items=1, max_items=10)
     research_metadata: Optional[ResearchMetadata] = None
