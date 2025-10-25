@@ -12,68 +12,11 @@ from pathlib import Path
 import json
 
 # Import các tiện ích đã được nâng cấp
-from .utils import PDFUtils, LAYOUTPARSER_AVAILABLE
+from .utils import PDFUtils
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-# def _process_page_worker(args: tuple) -> List[Dict]:
-#     """
-#     Worker xử lý một trang PDF.
-#     Nó gọi các hàm từ PDFUtils để thực hiện công việc trích xuất.
-#     """
-#     pdf_path, page_num, min_text_length, extract_images_flag, extract_tables_flag, use_layoutparser = args
-#     extracted_data = []
-    
-#     try:
-#         doc = fitz.open(pdf_path)
-#         page = doc.load_page(page_num)
-
-#         # Nếu LayoutParser được bật, phát hiện các vùng trước tiên
-#         layout_blocks = None
-#         if use_layoutparser and LAYOUTPARSER_AVAILABLE:
-#             layout_blocks = PDFUtils.detect_layout_regions(page)
-
-#         # 1. Trích xuất dựa trên bố cục nếu có
-#         if layout_blocks:
-#             # Trích xuất văn bản từ các vùng không phải là bảng/hình
-#             extracted_data.extend(
-#                 PDFUtils.extract_text_with_layout(page, page_num, min_text_length, layout_blocks)
-#             )
-#             # Trích xuất bảng từ các vùng đã phát hiện
-#             if extract_tables_flag and layout_blocks['tables']:
-#                 for table_bbox in layout_blocks['tables']:
-#                     extracted_data.extend(
-#                         PDFUtils.extract_table_from_bbox(page, page_num, pdf_path, table_bbox)
-#                     )
-#             # Trích xuất hình ảnh từ các vùng đã phát hiện
-#             if extract_images_flag and layout_blocks['figures']:
-#                  for fig_bbox in layout_blocks['figures']:
-#                     extracted_data.extend(
-#                         PDFUtils.extract_figure_from_bbox(page, page_num, fig_bbox)
-#                     )
-        
-#         # 2. Trích xuất thông thường nếu không dùng LayoutParser
-#         else:
-#             extracted_data.extend(
-#                 PDFUtils.extract_text_blocks(page, page_num, min_text_length)
-#             )
-#             if extract_tables_flag:
-#                 extracted_data.extend(
-#                     PDFUtils.extract_tables(page, page_num, pdf_path=pdf_path, use_layoutparser=False)
-#                 )
-#             if extract_images_flag:
-#                 extracted_data.extend(
-#                     PDFUtils.extract_images(page, page_num)
-#                 )
-            
-#         doc.close()
-        
-#     except Exception as e:
-#         logger.error(f"Error processing page {page_num} of {pdf_path}: {e}")
-        
-#     return extracted_data
 def _process_page_worker(args: tuple) -> List[Dict]:
     """
     SIMPLIFIED: VLM-based processing (no LayoutParser)
@@ -262,33 +205,3 @@ class PDFExtractor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
-
-# --- Entrypoint Example ---
-# async def main():
-#     # List of PDF files to process
-#     # note: Create dummy PDF files named 'test1.pdf', 'test2.pdf' for this to run.
-#     pdf_files = ["test1.pdf", "test2.pdf"] 
-    
-#     extractor = AdvancedPDFExtractor(
-#         min_text_length=50,
-#         extract_images=True,
-#         extract_tables=True
-#     )
-    
-#     # Run the asynchronous processing
-#     all_data = await extractor.process_files_async(pdf_files)
-    
-#     # Print summary
-#     for pdf_path, data in all_data.items():
-#         print(f"\n--- Results for {pdf_path} ---")
-#         text_count = sum(1 for item in data if item['type'] == 'text_chunk')
-#         table_count = sum(1 for item in data if item['type']  == 'table')
-#         image_count = sum(1 for item in data if item['type'] == 'figure')
-#         print(f"Found {text_count} text blocks, {table_count} tables, and {image_count} images.")
-#         # print(data[0] if data else "No data extracted.")
-
-# if __name__ == "__main__":
-#     # To run this, you need to have some PDF files in the same directory.
-#     # For example, create two dummy PDFs: test1.pdf and test2.pdf
-#     asyncio.run(main())

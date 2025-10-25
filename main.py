@@ -340,68 +340,6 @@ async def initialize_system() -> MultimodalRAGSystem:
         config=config
     )
 
-
-# async def main():
-#     """Main execution flow"""
-    
-#     # Load config and setup logging
-#     config = get_config()
-#     setup_logging(config)
-    
-#     # ==================== CONFIGURATION ====================
-#     SOURCES_TO_INGEST = [
-#         {'type': 'pdf', 'path': 'documents/1706.03762v7.pdf'},
-#         # {'type': 'youtube', 'url': 'https://youtu.be/YCzL96nL7j0?si=TLIpYP6Yvv8sLQyo'},
-#         # {'type': 'website', 'url': 'https://viblo.asia/p/recurrent-neural-networkphan-1-tong-quan-va-ung-dung-jvElaB4m5kw'},
-#     ]
-    
-#     QUESTION = """
-#     What is the attention mechanism in transformers and how does it improve sequence modeling compared to traditional RNNs?
-#     """
-#     # =======================================================
-
-#     try:
-#         # Initialize system
-#         rag_system = await initialize_system()
-
-#         # Step 1: Ingest documents
-#         logger.info("\n" + "="*80)
-#         logger.info("STEP 1: INGESTING DOCUMENTS")
-#         logger.info("="*80)
-        
-#         # Create documents directory if needed
-#         Path(config.paths.documents_dir).mkdir(exist_ok=True, parents=True)
-        
-#         if SOURCES_TO_INGEST:
-#             ingestion_results = await rag_system.ingest_sources(SOURCES_TO_INGEST)
-            
-#             # Print summary
-#             print("\nIngestion Summary:")
-#             for result in ingestion_results:
-#                 source = result['source']
-#                 status = result['result'].get('status', 'unknown')
-#                 print(f"  [{status.upper()}] {source['type']}: {source.get('path') or source.get('url')}")
-#                 if status == 'failed':
-#                     print(f"    Error: {result['result'].get('error')}")
-
-#         # Step 2: Query the system
-#         if QUESTION:
-#             logger.info("\n" + "="*80)
-#             logger.info("STEP 2: QUERYING THE SYSTEM")
-#             logger.info("="*80)
-            
-#             result = await rag_system.query(question=QUESTION)
-#             rag_system.print_query_result(result)
-
-#     except Exception as e:
-#         logger.error(f"Critical error in main execution: {e}", exc_info=True)
-#         raise
-    
-#     finally:
-#         if 'rag_system' in locals():
-#             rag_system.pipeline.db.close()
-#         logger.info("System shutdown complete")
-
 async def main():
     """R&D-optimized workflow"""
     

@@ -1,9 +1,6 @@
 """
 src/extraction/utils.py
 """
-import os, tempfile
-# os.environ["FVCORE_CACHE"] = os.path.join(tempfile.gettempdir(), "fvcore_cache")
- 
 import io
 import requests
 from src.enrichment.schema import LayoutDetectionOutput, TableExtractionOutput, FigureAnalysisOutput, BoundingBox
@@ -18,7 +15,6 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 import fitz
 import pdfplumber
-# import camelot
 import pandas as pd
 import re
 import logging
@@ -44,117 +40,6 @@ try:
 except ImportError:
     YOUTUBE_TRANSCRIPT_AVAILABLE = False
     logger.warning("youtube-transcript-api not installed. Install with: pip install youtube-transcript-api")
-
-
-# class TableStructureReconstructor:
-#     """Smart table structure reconstruction for multi-level headers"""
-
-#     @staticmethod
-#     def detect_header_rows(df: pd.DataFrame, max_header_rows: int = 5) -> int:
-#         """Detect how many rows are headers (not data)"""
-#         if len(df) < 2:
-#             return 1
-
-#         header_count = 0
-#         for i in range(min(max_header_rows, len(df))):
-#             row = df.iloc[i]
-#             row_str = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-#             tokens = row_str.split()
-#             if not tokens:
-#                 header_count += 1
-#                 continue
-            
-#             numeric_tokens = sum(1 for t in tokens if re.match(r'^[\d\.\,\%\±]+$', t))
-#             text_tokens = len(tokens) - numeric_tokens
-            
-#             header_keywords = ['retrieval', 'caption', 'accuracy', 'score', 'model', 'method', 'task', 'dataset', 'metric']
-#             has_keywords = any(kw in row_str.lower() for kw in header_keywords)
-            
-#             if text_tokens > numeric_tokens or has_keywords or numeric_tokens == 0:
-#                 header_count += 1
-#             else:
-#                 break
-        
-#         return max(1, header_count)
-
-#     @staticmethod
-#     def clean_noise_rows(df: pd.DataFrame, caption: str = "") -> pd.DataFrame:
-#         """Remove noise rows (captions, empty rows)"""
-#         cleaned_rows = []
-#         for _, row in df.iterrows():
-#             row_text = ' '.join(str(x) for x in row if pd.notna(x) and str(x).strip())
-#             if caption and len(caption) > 20:
-#                 caption_words = set(caption.lower().split()[:10])
-#                 row_words = set(row_text.lower().split())
-#                 if len(caption_words & row_words) > len(caption_words) * 0.5:
-#                     continue
-            
-#             non_empty = sum(1 for x in row if pd.notna(x) and str(x).strip())
-#             if non_empty < len(row) * 0.3:
-#                 continue
-            
-#             if re.search(r'Table\s+\d+[\.:]?\s+', row_text, re.IGNORECASE):
-#                 continue
-            
-#             cleaned_rows.append(row)
-        
-#         return pd.DataFrame(cleaned_rows).reset_index(drop=True) if cleaned_rows else pd.DataFrame()
-
-#     @staticmethod
-#     def reconstruct_hierarchical_headers(df: pd.DataFrame, header_rows: int) -> List[str]:
-#         """Reconstruct column names from multi-level headers"""
-#         if header_rows <= 1:
-#             return [str(x) if pd.notna(x) else f"col_{i}" for i, x in enumerate(df.iloc[0])]
-        
-#         header_matrix = [[str(x).strip() if pd.notna(x) and str(x).strip() else "" for x in df.iloc[i]] for i in range(header_rows)]
-#         num_cols = len(header_matrix[0])
-        
-#         for row_idx in range(len(header_matrix)):
-#             current_value = ""
-#             for col_idx in range(num_cols):
-#                 if header_matrix[row_idx][col_idx]:
-#                     current_value = header_matrix[row_idx][col_idx]
-#                 else:
-#                     header_matrix[row_idx][col_idx] = current_value
-        
-#         final_headers = []
-#         for col_idx in range(num_cols):
-#             parts = [header_matrix[row_idx][col_idx] for row_idx in range(len(header_matrix))]
-#             unique_parts = []
-#             for part in parts:
-#                 if part and part not in unique_parts:
-#                     unique_parts.append(part)
-            
-#             final_headers.append("_".join(unique_parts) if unique_parts else f"col_{col_idx}")
-        
-#         return final_headers
-
-#     @staticmethod
-#     def process_table(df: pd.DataFrame, caption: str = "") -> Optional[Dict]:
-#         """Complete table processing pipeline"""
-#         df = TableStructureReconstructor.clean_noise_rows(df, caption)
-#         if df.empty or len(df) < 2:
-#             return None
-        
-#         header_rows = TableStructureReconstructor.detect_header_rows(df)
-#         column_names = TableStructureReconstructor.reconstruct_hierarchical_headers(df, header_rows)
-        
-#         data_df = df.iloc[header_rows:].reset_index(drop=True)
-#         data_df.columns = column_names[:len(data_df.columns)]
-#         data_df = data_df.fillna("").astype(str)
-#         data_df = data_df[data_df.apply(lambda x: x.str.strip().str.len().sum(), axis=1) > 0]
-        
-#         if data_df.empty:
-#             return None
-        
-#         return {
-#             "headers": column_names,
-#             "rows": data_df.values.tolist(),
-#             "data": data_df.to_dict(orient='records'),
-#             "shape": {"rows": len(data_df), "columns": len(data_df.columns)},
-#             "metadata": {"header_rows_detected": header_rows, "has_hierarchical_headers": header_rows > 1}
-#         }
-
 
 class PDFUtils:
     """PDF utilities with complete Windows LayoutParser fix"""

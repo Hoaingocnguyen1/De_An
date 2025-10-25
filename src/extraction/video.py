@@ -141,16 +141,6 @@ class VideoExtractor:
         sources: List[str], 
         temp_dir_str: str = "./temp"
     ) -> Dict[str, List[Dict]]:
-        """
-        Process multiple video sources in parallel.
-        
-        Args:
-            sources: List of YouTube URLs or local video paths
-            temp_dir_str: Directory for temporary audio files
-        
-        Returns:
-            Dictionary mapping each source to its transcript segments
-        """
         start_time = time.time()
         temp_dir = Path(temp_dir_str)
         temp_dir.mkdir(exist_ok=True, parents=True)
