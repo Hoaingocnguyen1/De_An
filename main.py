@@ -18,7 +18,6 @@ from src.Pipeline import OptimizedPipeline
 from src.query_engine import EnhancedQueryEngine, VoyageReranker
 from src.embedder import TextEmbedder, MultimodalEmbedder, ContentEmbedder
 from src.enrichment.clients.gemini_client import GeminiClient
-from src.enrichment.clients.qwen_client import QwenClient
 
 # Extractors
 from src.extraction.pdf import PDFExtractor
@@ -223,12 +222,6 @@ async def initialize_system() -> MultimodalRAGSystem:
     if not mongo_handler.test_connection():
         raise ConnectionError("Failed to connect to MongoDB")
 
-    # LLM Clients
-    qwen_client = QwenClient(
-        api_key=config.qwen.api_key,
-        model_name=config.qwen.model_name
-    )
-    
     gemini_client = GeminiClient(
         api_key=config.gemini.api_key,
         model_name=config.gemini.model_name,
@@ -274,7 +267,7 @@ async def initialize_system() -> MultimodalRAGSystem:
     # Pipeline and query engine
     pipeline = OptimizedPipeline(
         mongo_handler=mongo_handler,
-        llm_client=qwen_client,
+        llm_client=GeminiClient,
         content_embedder=content_embedder,
         max_workers=config.processing.max_workers,
         batch_size=config.processing.batch_size

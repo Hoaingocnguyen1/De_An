@@ -61,7 +61,6 @@ class ContentEnricher:
 
 # from src.enrichment.enricher import ContentEnricher
 # from src.enrichment.clients.gemini_client import GeminiClient
-# from src.enrichment.clients.qwen_client import QwenClient
 
 # load_dotenv()
 # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -69,15 +68,11 @@ class ContentEnricher:
 
 # async def main():
 #     # --- CHỌN CLIENT BẠN MUỐN SỬ DỤNG ---
-#     # client_choice = "gemini"
-#     client_choice = "qwen"
+    # client_choice = "gemini"
     
 #     if client_choice == "gemini":
 #         if not GEMINI_API_KEY: raise ValueError("GEMINI_API_KEY not found!")
 #         client = GeminiClient(api_key=GEMINI_API_KEY)
-#     elif client_choice == "qwen":
-#         if not DASHSCOPE_API_KEY: raise ValueError("DASHSCOPE_API_KEY not found!")
-#         client = QwenClient(api_key=DASHSCOPE_API_KEY)
 #     else:
 #         raise ValueError("Invalid client choice")
 

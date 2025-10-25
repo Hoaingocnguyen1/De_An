@@ -222,16 +222,10 @@ reranker = VoyageReranker(
     model_name="rerank-2.5"  # Options: rerank-2.5, rerank-2
 )
 
-# Qwen for Enrichment
-qwen_client = QwenClient(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    model_name="qwen-vl-max"  # Options: qwen-vl-max, qwen-vl-plus
-)
-
 # Gemini for Synthesis
 gemini_client = GeminiClient(
     api_key=os.getenv("GEMINI_API_KEY"),
-    model_name="gemini-2.0-flash-exp",  # Options: gemini-2.0-flash-exp, gemini-1.5-pro
+    model_name="gemini-2.5-pro",  # Options: gemini-2.0-flash-exp, gemini-1.5-pro
     temperature=0.7
 )
 ```
@@ -479,19 +473,13 @@ db.knowledge_units.create_index([("ku_type", 1)])
 
 ---
 
-## 🔐 Security Best Practices
+## Security Best Practices
 
 1. **Never commit `.env` file**
 2. **Use environment variables for all secrets**
 3. **Restrict MongoDB network access**
 4. **Use read-only MongoDB user for queries**
 5. **Rotate API keys regularly**
-
----
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) file
 
 ---
 
@@ -518,8 +506,7 @@ Contributions welcome! Please:
 ## 🙏 Acknowledgments
 
 - **Voyage AI** for embeddings and reranking
-- **Google Gemini** for answer synthesis
-- **Alibaba Qwen** for content analysis
+- **Google Gemini** for answer synthesis, content analysis
 - **MongoDB** for vector database
 - **PyMuPDF, Camelot** for PDF processing
 - **Whisper** for video transcription

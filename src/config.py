@@ -42,7 +42,7 @@ class VoyageConfig(BaseModel):
 class GeminiConfig(BaseModel):
     """Google Gemini configuration"""
     api_key: str = Field(..., description="Gemini API key")
-    model_name: str = Field(default="gemini-2.0-flash-exp")
+    model_name: str = Field(default="gemini-2.5-flash")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=8192)
     
@@ -52,20 +52,6 @@ class GeminiConfig(BaseModel):
         if not v or not v.startswith('AIzaSy'):
             raise ValueError("Invalid Gemini API key")
         return v
-
-
-class QwenConfig(BaseModel):
-    """Qwen/DashScope configuration"""
-    api_key: str = Field(..., description="DashScope API key")
-    model_name: str = Field(default="qwen-vl-max")
-    
-    @field_validator('api_key')
-    @classmethod
-    def validate_api_key(cls, v):
-        if not v or not v.startswith('sk-'):
-            raise ValueError("Invalid DashScope API key")
-        return v
-
 
 class ProcessingConfig(BaseModel):
     """Pipeline processing configuration"""
@@ -97,7 +83,6 @@ class Config(BaseModel):
     database: DatabaseConfig
     voyage: VoyageConfig
     gemini: GeminiConfig
-    qwen: QwenConfig
     processing: ProcessingConfig
     query: QueryConfig
     paths: PathConfig
@@ -119,13 +104,9 @@ class Config(BaseModel):
             ),
             gemini=GeminiConfig(
                 api_key=os.getenv("GEMINI_API_KEY", ""),
-                model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+                model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
                 temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
                 max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "8192"))
-            ),
-            qwen=QwenConfig(
-                api_key=os.getenv("DASHSCOPE_API_KEY", ""),
-                model_name=os.getenv("QWEN_MODEL", "qwen-vl-max")
             ),
             processing=ProcessingConfig(
                 max_workers=int(os.getenv("MAX_WORKERS", "4")),
@@ -159,9 +140,6 @@ class Config(BaseModel):
         if not self.gemini.api_key or self.gemini.api_key == "":
             errors.append("GEMINI_API_KEY is not set")
         
-        if not self.qwen.api_key or self.qwen.api_key == "":
-            errors.append("DASHSCOPE_API_KEY is not set")
-        
         if not self.database.uri or self.database.uri == "":
             errors.append("MONGO_URI is not set")
         
@@ -185,9 +163,6 @@ class Config(BaseModel):
         print(f"\n Gemini:")
         print(f"  - Model: {self.gemini.model_name}")
         print(f"  - Temperature: {self.gemini.temperature}")
-        
-        print(f"\n Qwen:")
-        print(f"  - Model: {self.qwen.model_name}")
         
         print(f"\n  Processing:")
         print(f"  - Workers: {self.processing.max_workers}")

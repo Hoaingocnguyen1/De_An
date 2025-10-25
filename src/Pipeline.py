@@ -292,7 +292,7 @@ class OptimizedPipeline:
                 "enriched_content": {
                     "summary": enrichment.get('summary'),
                     "keywords": enrichment.get('keywords', []),
-                    "analysis_model": "qwen-vl-max"
+                    "analysis_model": "gemini-2.5-pro"
                 } if enrichment else None,
                 
                 # Embeddings

@@ -44,10 +44,6 @@ pip install -r requirements.txt
 1. Visit https://makersuite.google.com/app/apikey
 2. Create API key → Copy it
 
-#### Alibaba DashScope (Qwen Content Analysis)
-1. Visit https://dashscope.console.aliyun.com/
-2. Register and create API key → Copy it
-
 ### 3. Setup MongoDB Atlas
 
 ```bash
@@ -313,20 +309,6 @@ else:
 2. Check internet connection
 3. Verify API quota: https://www.voyageai.com/dashboard
 
-### Issue: "Qwen API Error"
-
-**Solution**: Verify DashScope API key and region:
-```python
-import dashscope
-dashscope.api_key = "your-key"
-
-# Test connection
-response = dashscope.Generation.call(
-    model="qwen-turbo",
-    prompt="Hello"
-)
-print(response)
-```
 
 ### Issue: Out of memory
 
