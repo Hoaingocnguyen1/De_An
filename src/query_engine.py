@@ -1,7 +1,3 @@
-"""
-src/query/query_engine.py
-Enhanced query engine with Voyage Rerank 2.5 and Gemini synthesis
-"""
 import logging
 from typing import List, Dict, Any, Optional
 import voyageai
@@ -68,7 +64,7 @@ class EnhancedQueryEngine:
 
     def _prepare_documents_for_reranking(
         self, 
-        contexts: List[Dict]
+        contexts: List[Dict] # This is the list that contains None values
     ) -> tuple[List[str], Dict[int, Dict]]:
         """
         Prepare documents for reranking and maintain index mapping
@@ -79,8 +75,15 @@ class EnhancedQueryEngine:
         documents = []
         index_mapping = {}
         
+        # The 'contexts' list is what you are iterating over. It contains a None.
         for idx, ctx in enumerate(contexts):
-            # Get the most representative text for reranking
+            
+            # --- FIX: ADD THIS LINE TO SKIP NONE VALUES ---
+            if ctx is None:
+                continue
+            # ----------------------------------------------
+            
+            # The rest of your code will now only run when 'ctx' is a valid dictionary.
             raw_content = ctx.get('raw_content', {})
             
             # Priority: enriched summary > source text > raw text
