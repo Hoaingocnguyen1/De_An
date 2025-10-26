@@ -28,14 +28,15 @@ class VoyageReranker:
         Returns:
             List of dicts with 'index' and 'relevance_score'
         """
+
         try:
-            result = voyageai.rerank(
+            result = voyageai.Client().rerank(
                 query=query,
                 documents=documents,
                 model=self.model_name,
                 top_k=top_k
             )
-            return result.results
+            return getattr(result, "results", [])
         except Exception as e:
             logger.error(f"Reranking failed: {e}")
             return []
@@ -84,11 +85,12 @@ class EnhancedQueryEngine:
             # ----------------------------------------------
             
             # The rest of your code will now only run when 'ctx' is a valid dictionary.
-            raw_content = ctx.get('raw_content', {})
-            
+            raw_content = ctx.get('raw_content') or {}
+            enriched = ctx.get('enriched_content') or {}
+
             # Priority: enriched summary > source text > raw text
             text = (
-                ctx.get('enriched_content', {}).get('summary', '') or
+                enriched.get('summary', '') or
                 raw_content.get('source_text_for_embedding', '') or
                 raw_content.get('text', '') or
                 f"[{ctx.get('ku_type', 'unknown')} content]"
@@ -117,14 +119,14 @@ class EnhancedQueryEngine:
             ku_type = ctx.get('ku_type', 'unknown')
             
             # Get content based on type
-            raw_content = ctx.get('raw_content', {})
-            enriched = ctx.get('enriched_content', {})
+            raw_content = ctx.get('raw_content') or {}
+            enriched = ctx.get('enriched_content') or {}
             
             # Build context section
             header = f"[Source {idx}] Type: {ku_type.upper()}"
             
             # Add page/time context if available
-            context_meta = ctx.get('context', {})
+            context_meta = ctx.get('context') or {}
             if page := context_meta.get('page_number'):
                 header += f" | Page: {page}"
             if start_time := context_meta.get('start_time_seconds'):
@@ -168,8 +170,8 @@ class EnhancedQueryEngine:
                 source['timestamp'] = f"{int(start_time // 60)}:{int(start_time % 60):02d}"
             
             # Add preview
-            raw_content = ctx.get('raw_content', {})
-            enriched = ctx.get('enriched_content', {})
+            raw_content = ctx.get('raw_content') or {}
+            enriched = ctx.get('enriched_content') or {}
             
             preview = (
                 enriched.get('summary', '') or
@@ -239,10 +241,47 @@ class EnhancedQueryEngine:
         
         # Map reranked results back to contexts
         reranked_contexts = []
-        for result in rerank_results:
-            original_ctx = index_mapping[result['index']]
-            original_ctx['rerank_score'] = result['relevance_score']
-            reranked_contexts.append(original_ctx)
+        if not rerank_results:
+            # Fallback: reranker unavailable or returned nothing — use original
+            # vector-search ordering (take top final_k retrieved contexts)
+            logger.warning("Reranker returned no results, falling back to vector-search ordering")
+            for ctx in retrieved_chunks[:final_k]:
+                if ctx is None:
+                    continue
+                ctx['rerank_score'] = ctx.get('score', 0.0)
+                reranked_contexts.append(ctx)
+        else:
+            for result in rerank_results:
+                idx = None
+                score = None
+                # Support multiple possible result formats returned by different clients
+                if isinstance(result, dict):
+                    idx = result.get('index')
+                    score = result.get('relevance_score') or result.get('score')
+                elif isinstance(result, (list, tuple)) and len(result) >= 2:
+                    # Try to infer which element is index (int)
+                    if isinstance(result[0], int):
+                        idx = result[0]
+                        score = result[1]
+                    elif isinstance(result[1], int):
+                        idx = result[1]
+                        score = result[0]
+                # If we couldn't parse, skip
+                if idx is None:
+                    logger.warning(f"Unexpected rerank result format: {result}")
+                    continue
+
+                original_ctx = index_mapping.get(idx)
+                if not original_ctx:
+                    logger.debug(f"No original context found for rerank index: {idx}")
+                    continue
+
+                if score is not None:
+                    original_ctx['rerank_score'] = score
+                else:
+                    original_ctx['rerank_score'] = original_ctx.get('score', 0.0)
+
+                reranked_contexts.append(original_ctx)
         
         logger.info(f"  ✓ Reranked to top-{len(reranked_contexts)} results")
 

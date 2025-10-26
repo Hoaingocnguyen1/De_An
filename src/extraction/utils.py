@@ -23,6 +23,14 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# Optional dependency: trafilatura for robust HTML main-content extraction
+try:
+    import trafilatura
+    TRAFILATURA_AVAILABLE = True
+except ImportError:
+    trafilatura = None
+    TRAFILATURA_AVAILABLE = False
+
 # try:
 #     import layoutparser as lp
 #     LAYOUTPARSER_AVAILABLE = True
@@ -534,16 +542,36 @@ class WebsiteUtils:
             # Kiểm tra nếu request không thành công
             response.raise_for_status()
 
-            # Sử dụng trafilatura để trích xuất nội dung chính từ HTML
-            # Đây là bước "thần kỳ", nó tự động làm sạch và lấy ra phần quan trọng nhất
-            main_text = trafilatura.extract(response.text, include_comments=False, include_tables=False)
-            
-            if main_text:
-                logger.info(f"Successfully extracted text from: {url}")
-                return main_text
-            else:
-                logger.warning(f"Could not extract main content from {url}, the page might be JavaScript-heavy or have no main text.")
-                return None
+            # If trafilatura is available, prefer it for robust main-text extraction
+            if TRAFILATURA_AVAILABLE and trafilatura is not None:
+                main_text = trafilatura.extract(response.text, include_comments=False, include_tables=False)
+                if main_text:
+                    logger.info(f"Successfully extracted text from: {url} (trafilatura)")
+                    return main_text
+
+            # Fallback: attempt a lightweight HTML-to-text extraction without extra deps
+            html = response.text
+            # Try to extract <article> block first
+            article_match = re.search(r"<article[\s\S]*?</article>", html, flags=re.IGNORECASE)
+            if article_match:
+                text = re.sub(r"<[^>]+>", "", article_match.group(0))
+                text = re.sub(r"\s+", " ", text).strip()
+                if len(text) > 50:
+                    logger.info(f"Successfully extracted text from: {url} (article fallback)")
+                    return text
+
+            # Otherwise, collect all <p> tags content
+            paragraphs = re.findall(r"<p[\s\S]*?</p>", html, flags=re.IGNORECASE)
+            if paragraphs:
+                texts = [re.sub(r"<[^>]+>", "", p) for p in paragraphs]
+                joined = "\n\n".join(t.strip() for t in texts if t.strip())
+                joined = re.sub(r"\s+", " ", joined).strip()
+                if len(joined) > 50:
+                    logger.info(f"Successfully extracted text from: {url} (p-tags fallback)")
+                    return joined
+
+            logger.warning(f"Could not extract main content from {url}; the page may be JavaScript-heavy or have no main text.")
+            return None
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch URL {url}: {e}")

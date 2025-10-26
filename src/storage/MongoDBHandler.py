@@ -4,7 +4,7 @@ Enhanced MongoDB handler with optimized vector search for multimodal RAG
 """
 
 from pymongo import MongoClient, ASCENDING
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure, DuplicateKeyError, BulkWriteError
 from typing import List, Dict, Any, Optional, Literal
 from bson import ObjectId
 from datetime import datetime
@@ -78,9 +78,18 @@ class MongoDBHandler:
             "updated_at": datetime.utcnow()
         }
         
-        result = self.sources.insert_one(source_doc)
-        logger.info(f"Created source document: {result.inserted_id}")
-        return result.inserted_id
+        try:
+            result = self.sources.insert_one(source_doc)
+            logger.info(f"Created source document: {result.inserted_id}")
+            return result.inserted_id
+        except DuplicateKeyError as e:
+            # Source with same URI already exists; return existing id
+            logger.warning(f"Duplicate source URI detected: {source_doc.get('source_uri')}. Reusing existing document.")
+            existing = self.sources.find_one({"source_uri": source_doc.get("source_uri")})
+            if existing:
+                return existing["_id"]
+            # If for some reason not found, re-raise
+            raise
     
     def update_source_status(
         self, 
@@ -141,9 +150,24 @@ class MongoDBHandler:
             if "created_at" not in ku:
                 ku["created_at"] = datetime.utcnow()
         
-        result = self.knowledge_units.insert_many(kus)
-        logger.info(f"✓ Inserted {len(result.inserted_ids)} knowledge units")
-        return result.inserted_ids
+        try:
+            # Use unordered insert so duplicates don't abort the whole batch
+            result = self.knowledge_units.insert_many(kus, ordered=False)
+            logger.info(f"✓ Inserted {len(result.inserted_ids)} knowledge units")
+            return result.inserted_ids
+        except BulkWriteError as bwe:
+            # Some documents may already exist (duplicate ku_id). Collect existing IDs.
+            logger.warning(f"Batch insert partially failed (possible duplicates). Details: {bwe.details}")
+            inserted_ids = []
+            for ku in kus:
+                ku_id = ku.get("ku_id")
+                if not ku_id:
+                    continue
+                existing = self.get_ku_by_id(ku_id)
+                if existing:
+                    inserted_ids.append(existing["_id"])
+            logger.info(f"✓ Resolved {len(inserted_ids)} existing/inserted knowledge units after BulkWriteError")
+            return inserted_ids
     
     def get_ku_by_id(self, ku_id: str) -> Optional[Dict]:
         """Retrieve KU by its readable ID"""

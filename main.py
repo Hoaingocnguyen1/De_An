@@ -80,7 +80,11 @@ class MultimodalRAGSystem:
                 elif source_type == 'video':
                     result = await self._ingest_video(source['path'])
                 elif source_type == 'website':
-                    result = await self._ingest_website(source['url'])
+                    # Accept either 'url' or 'path' to specify website URL
+                    website_url = source.get('url') or source.get('path')
+                    if not website_url:
+                        raise KeyError('url')
+                    result = await self._ingest_website(website_url)
                 elif source_type == 'image':
                     result = await self._ingest_image(source['path'])
                 else:
@@ -241,7 +245,11 @@ class MultimodalRAGSystem:
             
             print(f"  Vector Score: {source.get('score', 0):.4f}")
             if source.get('rerank_score'):
-                print(f"  Rerank Score: {source['rerank_score']:.4f}")
+                # Safely format rerank_score which may be string or numeric
+                try:
+                    print(f"  Rerank Score: {float(source['rerank_score']):.4f}")
+                except Exception:
+                    print(f"  Rerank Score: {source.get('rerank_score')}")
             
             print(f"  Preview: {source.get('preview', 'N/A')}")
         
@@ -349,9 +357,9 @@ async def main():
     # ==================== CONFIGURATION ====================
     # Test papers for R&D automation
     SOURCES_TO_INGEST = [
-        # {'type': 'pdf', 'path': 'documents/1706.03762.pdf'},
-        {'type': 'website', 'path': 'https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl'},
-        # {'type': 'youtube', 'url': 'https://youtu.be/zxQyTK8quyY?si=3V5hXmhV0DXL6a8r'},  # Conference talk
+        {'type': 'pdf', 'path': 'documents/1706.03762.pdf'},
+        # {'type': 'website', 'path': 'https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl'},
+        # {'type': 'youtube', 'url': 'https://youtu.be/zxQyTK8quyY?si=3V5hXmhV0DXL6a8r'}, 
     ]
     
     # R&D-focused queries
@@ -482,9 +490,20 @@ async def main():
                     if 'timestamp' in source:
                         print(f"  Time: {source['timestamp']}")
                     
-                    print(f"  Vector Score: {source.get('score', 0):.4f}")
-                    if source.get('rerank_score'):
-                        print(f"  Rerank Score: {source['rerank_score']:.4f}")
+                    # Safe formatting: some environments return non-numeric scores (strings/None).
+                    vec_score = source.get('score', 0)
+                    try:
+                        print(f"  Vector Score: {float(vec_score):.4f}")
+                    except Exception:
+                        print(f"  Vector Score: {vec_score}")
+
+                    if source.get('rerank_score') is not None:
+                        rerank_score = source.get('rerank_score')
+                        try:
+                            print(f"  Rerank Score: {float(rerank_score):.4f}")
+                        except Exception:
+                            # Fall back to raw representation if conversion fails
+                            print(f"  Rerank Score: {rerank_score}")
                     
                     if PRINT_DETAILED_SOURCES:
                         print(f"  Preview: {source.get('preview', 'N/A')}")
