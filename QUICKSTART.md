@@ -10,89 +10,49 @@ Get your Multimodal RAG system running in **5 minutes**!
 - [ ] Google Gemini API key obtained
 - [ ] Alibaba DashScope API key obtained
 
----
+# QUICKSTART
 
-## ⚡ Installation Steps
+These are the minimal steps to run this Multimodal RAG project locally on Windows using PowerShell and Python 3.11.
 
-### 1. Clone and Setup
+Prerequisites
+- Python 3.11
+- Git (optional)
+- A MongoDB instance (Atlas or local) reachable via connection string
+- API keys for services you plan to use (Voyage AI for embeddings, Gemini for synthesis, etc.)
 
-```bash
-# Clone repository
-git clone https://github.com/yourusername/multimodal-rag.git
-cd multimodal-rag
+1) Create and activate a virtual environment (PowerShell)
 
-# Create virtual environment
-python -m venv venv
+```powershell
+python -m venv .venv
+. .\.venv\Scripts\Activate.ps1
+```
 
-# Activate (Windows)
-venv\Scripts\activate
-# OR Activate (macOS/Linux)
-source venv/bin/activate
+2) Install Python dependencies
 
-# Install dependencies
+```powershell
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. Get API Keys
+3) Create your .env file
 
-#### Voyage AI (Embeddings + Reranking)
-1. Visit https://www.voyageai.com/
-2. Sign up and navigate to API Keys
-3. Create new key → Copy it
-
-#### Google Gemini (Answer Synthesis)
-1. Visit https://makersuite.google.com/app/apikey
-2. Create API key → Copy it
-
-### 3. Setup MongoDB Atlas
-
-```bash
-# 1. Create free cluster at https://www.mongodb.com/cloud/atlas/register
-
-# 2. Create database user:
-#    - Database Access → Add New User
-#    - Username: rag_user
-#    - Password: (generate secure password)
-
-# 3. Whitelist IP:
-#    - Network Access → Add IP Address
-#    - Allow access from anywhere: 0.0.0.0/0
-
-# 4. Get connection string:
-#    - Click "Connect" → "Connect your application"
-#    - Copy connection string
-#    - Replace <password> with your password
+```powershell
+copy .env.example .env
+# Edit .env with your keys and connection string (use any text editor)
 ```
 
-### 4. Configure Environment
+Minimum environment variables
+- MONGO_URI — MongoDB connection string
+- VOYAGE_API_KEY — API key for embeddings (Voyage)
+- GEMINI_API_KEY — API key for Google Gemini (if used)
 
-```bash
-# Copy template
-cp .env.example .env
+See `.env.example` for the full list of optional variables and defaults.
 
-# Edit .env and add your keys:
-nano .env  # or use your preferred editor
-```
+4) Create MongoDB Atlas vector index (if using Atlas)
 
-**Minimum required configuration:**
+If you plan to use MongoDB Atlas vector search, create an index for the `knowledge_units` collection. In Atlas UI: Clusters → Search → Create Search Index. Use the JSON editor and make an index that maps `embeddings.vector` as a knnVector with the appropriate dimensions (the default embedding dimension used in this repo is 1024).
 
-```env
-MONGO_URI=mongodb+srv://rag_user:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-VOYAGE_API_KEY=pa-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GEMINI_API_KEY=AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### 5. Create Vector Search Index
-
-**IMPORTANT**: MongoDB requires manual index creation for vector search.
-
-1. Go to MongoDB Atlas → Your Cluster
-2. Click **"Search"** tab
-3. Click **"Create Search Index"**
-4. Choose **"JSON Editor"**
-5. Select database: `multimodal_rag_db`, collection: `knowledge_units`
-6. Paste this configuration:
+Example mapping (adjust dimensions to match your embedding model):
 
 ```json
 {
@@ -114,220 +74,28 @@ DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }
 ```
 
-7. Name it: `vector_index`
-8. Click **"Create Search Index"**
-9. Wait 1-2 minutes for index to be ready
+Name the index (for example `vector_index`) and wait for it to build.
 
----
+5) Ingest documents (example)
 
-## 🎯 First Run
+Place PDFs or other supported sources into the `documents/` folder. Then run:
 
-### Prepare Test Documents
-
-```bash
-# Create documents folder
-mkdir -p documents/pdfs
-
-# Add your PDF files
-# For testing, download a sample paper:
-wget https://arxiv.org/pdf/2010.11929.pdf -O documents/pdfs/vision_transformer.pdf
-```
-
-### Run the System
-
-```bash
+```powershell
 python main.py
 ```
 
-**Expected output:**
+Outputs
+- Knowledge units (KUs) are written to MongoDB (see `src/storage/MongoDBHandler.py`).
+- Query results are saved under `output/queries/` when you run the query flow.
 
-```
-2024-01-15 10:30:00 - INFO - ✓ MongoDB connection successful
-2024-01-15 10:30:01 - INFO - GeminiClient initialized with model: gemini-2.0-flash-exp
-2024-01-15 10:30:01 - INFO - TextEmbedder initialized with Voyage AI model: voyage-3
-2024-01-15 10:30:01 - INFO - ✓ Optimized pipeline initialized
-2024-01-15 10:30:01 - INFO - ✓ Enhanced Query Engine ready with reranking
-2024-01-15 10:30:01 - INFO - ✓ Multimodal RAG System initialized
+Troubleshooting hints
+- If ingestion raises duplicate-key BulkWriteError, the pipeline performs unordered bulk inserts and will continue; check logs to see if some KUs were skipped.
+- If VLM table extraction fails for a PDF, the pipeline includes a pdfplumber fallback — try ingesting that PDF and check logs for the fallback path.
+- For PowerShell activation issues you may need to set your execution policy:
 
-================================================================================
-STEP 1: INGESTING DOCUMENTS
-================================================================================
-2024-01-15 10:30:02 - INFO - ⚡ Processing pdf: documents/pdfs/vision_transformer.pdf
-2024-01-15 10:30:05 - INFO -   [1/4] Extracting content in parallel...
-2024-01-15 10:30:15 - INFO -   ✓ Extracted 45 raw objects
-2024-01-15 10:30:15 - INFO -   [2/4] Enriching content in batches...
-2024-01-15 10:30:25 - INFO -   ✓ Enriched 45 objects
-2024-01-15 10:30:25 - INFO -   [3/4] Generating embeddings in batches...
-2024-01-15 10:30:35 - INFO -   ✓ Generated embeddings for 52 knowledge units
-2024-01-15 10:30:35 - INFO -   [4/4] Finalizing Knowledge Units...
-2024-01-15 10:30:36 - INFO - ✓ Completed documents/pdfs/vision_transformer.pdf in 34.2s - 52 KUs created.
-
-================================================================================
-STEP 2: QUERYING THE SYSTEM
-================================================================================
-2024-01-15 10:30:40 - INFO -   [1/4] Embedding query with voyage-3
-2024-01-15 10:30:41 - INFO -   [2/4] Retrieving top-20 candidates...
-2024-01-15 10:30:42 - INFO -   [3/4] Reranking with rerank-2.5...
-2024-01-15 10:30:43 - INFO -   ✓ Reranked to top-5 results
-2024-01-15 10:30:43 - INFO -   [4/4] Synthesizing answer with GeminiClient
-2024-01-15 10:30:45 - INFO - ✓ Query completed successfully
-
-================================================================================
-ANSWER:
-================================================================================
-The Vision Transformer (ViT) introduces several key architectural innovations...
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
----
-
-## 🧪 Test Individual Components
-
-### Test MongoDB Connection
-
-```python
-from src.storage.mongodb_handler import MongoDBHandler
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-db = MongoDBHandler(os.getenv("MONGO_URI"))
-
-if db.test_connection():
-    print("✓ MongoDB connected!")
-    stats = db.get_statistics()
-    print(f"Total KUs: {stats['total_kus']}")
-else:
-    print("✗ Connection failed!")
-```
-
-### Test Embeddings
-
-```python
-from src.embedding.Embedder import TextEmbedder
-import os
-
-embedder = TextEmbedder(api_key=os.getenv("VOYAGE_API_KEY"))
-vector = embedder.embed("This is a test")
-print(f"✓ Vector dimension: {len(vector)}")
-print(f"First 5 values: {vector[:5]}")
-```
-
-### Test PDF Extraction
-
-```python
-from src.extraction.pdf import PDFExtractor
-
-extractor = PDFExtractor()
-results = extractor.extract_parallel("documents/pdfs/test.pdf")
-print(f"✓ Extracted {len(results)} elements")
-
-# Count by type
-from collections import Counter
-types = Counter(r['type'] for r in results)
-print(f"Types: {dict(types)}")
-```
-
----
-
-## 🎓 Next Steps
-
-### 1. Customize Configuration
-
-Edit `main.py` to adjust:
-
-```python
-# Processing parameters
-pipeline = OptimizedPipeline(
-    max_workers=8,      # Increase for more parallel processing
-    batch_size=32       # Increase for faster embedding
-)
-
-# Query parameters
-result = await rag_system.query(
-    question="Your question",
-    initial_k=50,       # Retrieve more candidates
-    final_k=10          # Keep more final results
-)
-```
-
-### 2. Add More Documents
-
-```python
-SOURCES_TO_INGEST = [
-    {'type': 'pdf', 'path': 'documents/paper1.pdf'},
-    {'type': 'pdf', 'path': 'documents/paper2.pdf'},
-    {'type': 'website', 'url': 'https://arxiv.org/abs/2010.11929'},
-    {'type': 'youtube', 'url': 'https://youtube.com/watch?v=xxxxx'},
-]
-```
-
-### 3. Explore Advanced Features
-
-```python
-# Get database statistics
-stats = db.get_statistics()
-print(stats)
-
-# List all sources
-sources = db.list_sources(status="completed")
-
-# Hybrid search
-results = db.hybrid_search(
-    query_vector=vector,
-    text_query="transformer architecture",
-    vector_weight=0.7
-)
-```
-
----
-
-## ❓ Troubleshooting
-
-### Issue: "Vector search returned 0 results"
-
-**Solution**: Check if vector index is created in MongoDB Atlas.
-
-```python
-# Test vector search
-from src.storage.mongodb_handler import MongoDBHandler
-db = MongoDBHandler(os.getenv("MONGO_URI"))
-
-test_vector = [0.1] * 1024  # Dummy vector
-results = db.vector_search(test_vector, top_k=5)
-
-if not results:
-    print("❌ Vector index not configured correctly!")
-    print("Please create the index in MongoDB Atlas (see step 5)")
-else:
-    print(f"✓ Vector search works! Found {len(results)} results")
-```
-
-### Issue: "Failed to get embeddings from Voyage AI"
-
-**Solutions**:
-1. Check API key is correct
-2. Check internet connection
-3. Verify API quota: https://www.voyageai.com/dashboard
-
-
-### Issue: Out of memory
-
-**Solution**: Reduce batch size and workers:
-```python
-pipeline = OptimizedPipeline(
-    max_workers=2,
-    batch_size=4
-)
-```
-
----
-
-## 📞 Need Help?
-
-- **Documentation**: See [README.md](README.md)
-- **Issues**: https://github.com/yourusername/multimodal-rag/issues
-- **Discord**: [Join our community](#)
-
----
-
-**Ready to build amazing RAG applications! 🎉**
+Further reading
+- See `README.md` for a longer description, env var list, and troubleshooting steps.

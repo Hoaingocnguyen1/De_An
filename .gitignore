@@ -65,9 +65,6 @@ output/
 *.pkl
 *.pickle
 
-# Documents (don't commit your data)
-documents/
-!documents/.gitkeep
 
 # Model files
 models/

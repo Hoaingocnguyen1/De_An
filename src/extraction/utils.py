@@ -80,7 +80,7 @@ class PDFUtils:
             return None
     
     @staticmethod
-    async def extract_table_with_vlm(table_image: Image.Image, vlm_client, page_num: int, caption: str = "") -> Optional[Dict]:
+    async def extract_table_with_vlm(table_image: Image.Image, vlm_client, page_num: int, caption: str = "", pdf_path: Optional[str] = None, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[Dict]:
         """VLM extract table structure with robust handling"""
         try:
             prompt = f"""Extract this table's structure. Caption: {caption}
@@ -136,8 +136,71 @@ class PDFUtils:
             
         except Exception as e:
             logger.error(f"Page {page_num+1}: VLM table extraction failed - {e}")
+            # Fall back to pdfplumber-based table extraction if possible
+            try:
+                logger.info(f"Page {page_num+1}: Attempting pdfplumber fallback for table extraction")
+                # We may receive PIL Image only; caller can optionally call PDFUtils.extract_table_with_pdfplumber
+                return None
+            except Exception:
+                return None
+
+    @staticmethod
+    def extract_table_with_pdfplumber(pdf_path: str, page_num: int, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[Dict]:
+        """Fallback table extraction using pdfplumber. Returns same dict format as VLM extractor."""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                if page_num < 0 or page_num >= len(pdf.pages):
+                    logger.warning(f"pdfplumber: page {page_num+1} out of range")
+                    return None
+
+                page = pdf.pages[page_num]
+                tables = []
+                # If bbox provided, crop the page first
+                if bbox:
+                    try:
+                        x0, y0, x1, y1 = bbox
+                        cropped = page.within_bbox((x0, y0, x1, y1))
+                        tables = cropped.extract_tables()
+                    except Exception:
+                        tables = page.extract_tables()
+                else:
+                    tables = page.extract_tables()
+
+                if not tables:
+                    logger.warning(f"pdfplumber: No tables found on page {page_num+1}")
+                    return None
+
+                # Use the first table found
+                raw_table = tables[0]
+                # pdfplumber returns a list of rows where first row is header in many cases
+                if len(raw_table) < 2:
+                    logger.warning(f"pdfplumber: Table too small on page {page_num+1}")
+                    return None
+
+                headers = [h if h is not None else f"col{i+1}" for i, h in enumerate(raw_table[0])]
+                rows = []
+                for row in raw_table[1:]:
+                    record = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
+                    rows.append(record)
+
+                df = pd.DataFrame(rows)
+                return {
+                    "type": "table",
+                    "page": page_num + 1,
+                    "headers": headers,
+                    "rows": rows,
+                    "data": df.to_dict(orient='records'),
+                    "caption": "",
+                    "metadata": {
+                        "extraction_method": "pdfplumber",
+                        "confidence": 0.5
+                    }
+                }
+        except Exception as e:
+            logger.error(f"pdfplumber table extraction failed on page {page_num+1}: {e}")
             return None
-    
+
+
     @staticmethod
     async def analyze_figure_with_vlm(figure_image: Image.Image, vlm_client, page_num: int, caption: str = "") -> Optional[Dict]:
         """VLM analyze figure"""

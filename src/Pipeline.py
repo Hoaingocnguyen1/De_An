@@ -145,10 +145,21 @@ class OptimizedPipeline:
                         cropped = page_image.crop((bbox.x1, bbox.y1, bbox.x2, bbox.y2))
                         
                         if region.type == "table":
+                            # Try VLM-based table extraction first (pass pdf_path for potential fallback)
                             table_data = await PDFUtils.extract_table_with_vlm(
-                                cropped, self.enricher.client, page_num, region.description
+                                cropped, self.enricher.client, page_num, region.description, pdf_path=pdf_path, bbox=(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
                             )
-                            
+
+                            # If VLM failed or returned empty, attempt pdfplumber fallback using page bbox
+                            if not table_data or not table_data.get('data'):
+                                logger.info(f"Page {page_num+1}: VLM table extraction empty, trying pdfplumber fallback")
+                                try:
+                                    pdf_table = PDFUtils.extract_table_with_pdfplumber(pdf_path, page_num, bbox=(bbox.x1, bbox.y1, bbox.x2, bbox.y2))
+                                    if pdf_table and pdf_table.get('data'):
+                                        table_data = pdf_table
+                                except Exception as e:
+                                    logger.warning(f"pdfplumber fallback failed: {e}")
+
                             if table_data and table_data.get('data') and len(table_data['data']) > 0:
                                 tables_detected.append(table_data)
                             else:
@@ -159,7 +170,13 @@ class OptimizedPipeline:
                                 cropped, self.enricher.client, page_num, region.description
                             )
                             if figure_data:
+                                # Attach image bytes for later embedding/storage if needed
                                 figure_data['image_data'] = cropped
+                                figure_data['analysis'] = {
+                                    'caption': region.description,
+                                    'raw_findings': figure_data.get('key_findings', []),
+                                    'numerical_data': figure_data.get('numerical_data', [])
+                                }
                                 figures_detected.append(figure_data)
                     
                     except Exception as e:
@@ -221,9 +238,18 @@ class OptimizedPipeline:
                         'type':'table',
                         'page':table['page'],
                         'data':table['data'],
-                        'caption':table['caption'],
-                        'enrichment':enrichment,
-                        'embedding_vector':emb_data['vector']
+                        'caption':table.get('caption', ''),
+                        'raw_content': {
+                            'table': table.get('data'),
+                            'headers': table.get('headers'),
+                            'asset_uri': None
+                        },
+                        'enrichment': enrichment,
+                        'embeddings': {
+                            'vector': emb_data['vector'],
+                            'model': emb_data.get('model') if isinstance(emb_data, dict) else None,
+                            'type': emb_data.get('embedding_type') if isinstance(emb_data, dict) else None
+                        }
                     })
             except Exception as e:
                 logger.error(f"Failed to process table: {e}")
@@ -237,12 +263,22 @@ class OptimizedPipeline:
                     figure['image_data'], figure['caption'], enrichment.get('summary','')
                 )
                 if emb_data['vector']:
+                    # Save preview/analysis in raw_content so it is retrievable during multimodal queries
                     figure_kus.append({
-                        'type':'figure',
-                        'page':figure['page'],
-                        'caption':figure['caption'],
-                        'enrichment':enrichment,
-                        'embedding_vector':emb_data['vector']
+                        'type': 'figure',
+                        'page': figure['page'],
+                        'caption': figure.get('caption', ''),
+                        'raw_content': {
+                            'caption': figure.get('caption', ''),
+                            'analysis': figure.get('analysis', {}),
+                            'asset_uri': None
+                        },
+                        'enrichment': enrichment,
+                        'embeddings': {
+                            'vector': emb_data['vector'],
+                            'model': emb_data.get('model') if isinstance(emb_data, dict) else None,
+                            'type': emb_data.get('embedding_type') if isinstance(emb_data, dict) else None
+                        }
                     })
             except Exception as e:
                 logger.error(f"Failed to process figure: {e}")
@@ -483,8 +519,8 @@ class OptimizedPipeline:
                 "ku_type": obj_type,
                 "created_at": datetime.utcnow(),
                 "raw_content": {
-                    "text": obj.get('text') or obj.get('source_text'),
-                    "asset_uri": None,
+                    "text": (obj.get('text') or (obj.get('raw_content') or {}).get('text') or obj.get('source_text')),
+                    "asset_uri": (obj.get('raw_content') or {}).get('asset_uri') if obj.get('raw_content') else None,
                 },
                 "context": {
                     "page_number": obj.get('page'),
@@ -499,23 +535,28 @@ class OptimizedPipeline:
                     "analysis_model": "gemini-2.5-pro"
                 } if enrichment else None,
                 "embeddings": {
-                    "vector": obj.get('embedding_vector', []),
-                    "model": self.embedder.text_embedder.model_name 
-                            if obj.get('embedding_type') == 'text' 
-                            else self.embedder.multimodal_embedder.model_name
+                    "vector": (obj.get('embeddings') or {}).get('vector') or obj.get('embedding_vector') or obj.get('vector') or [],
+                    "model": (obj.get('embeddings') or {}).get('model') or (
+                        self.embedder.text_embedder.model_name if obj.get('embedding_type') == 'text' else self.embedder.multimodal_embedder.model_name
+                    )
                 }
             }
             
             # Add type-specific metadata
             if obj_type == 'table':
-                ku['raw_content']['table_data'] = obj.get('data')
-                ku['context']['caption'] = obj.get('caption')
+                # support both legacy and new structures
+                ku['raw_content']['table_data'] = obj.get('data') or (obj.get('raw_content') or {}).get('table')
+                ku['context']['caption'] = obj.get('caption') or (obj.get('raw_content') or {}).get('caption')
+                # copy extraction metadata if available
+                if obj.get('metadata'):
+                    ku['raw_content']['metadata'] = obj.get('metadata')
             elif obj_type == 'figure':
-                ku['context']['figure_id'] = obj.get('figure_id')
-                ku['context']['caption'] = obj.get('caption')
+                ku['context']['figure_id'] = obj.get('figure_id') or (obj.get('raw_content') or {}).get('figure_id')
+                ku['context']['caption'] = obj.get('caption') or (obj.get('raw_content') or {}).get('caption')
+                ku['raw_content']['analysis'] = (obj.get('raw_content') or {}).get('analysis') or obj.get('analysis')
                 ku['context']['dimensions'] = {
-                    'width': obj.get('width'),
-                    'height': obj.get('height')
+                    'width': obj.get('width') or (obj.get('raw_content') or {}).get('width'),
+                    'height': obj.get('height') or (obj.get('raw_content') or {}).get('height')
                 }
             
             kus.append(ku)

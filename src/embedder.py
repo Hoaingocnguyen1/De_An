@@ -169,11 +169,14 @@ class ContentEmbedder:
         if not vector:
             logger.warning("Multimodal embedding failed, falling back to text embedding")
             vector = self.text_embedder.embed(text_description)
-        
+        embedding_type = "multimodal" if vector and len(vector) > 0 and self.multimodal_embedder else "text"
+        model_used = self.multimodal_embedder.model_name if embedding_type == "multimodal" else self.text_embedder.model_name
+
         return {
             "vector": vector,
             "source_text": text_description,
-            "embedding_type": "multimodal" if vector else "text"
+            "embedding_type": embedding_type,
+            "model": model_used
         }
 
     def embed_table(
@@ -214,7 +217,8 @@ class ContentEmbedder:
         return {
             "vector": vector,
             "source_text": combined_text,
-            "embedding_type": embedding_type
+            "embedding_type": embedding_type,
+            "model": self.text_embedder.model_name if embedding_type == "text" else self.multimodal_embedder.model_name
         }
 
     def embed_text_chunk(self, text: str) -> List[Dict[str, Any]]:
