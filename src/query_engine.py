@@ -99,7 +99,10 @@ class EnhancedQueryEngine:
             text_with_metadata = f"[Type: {ku_type}] {text}"
             
             documents.append(text_with_metadata)
-            index_mapping[idx] = ctx
+            # Map the document's position in the `documents` list (0..n-1)
+            # to the original context. The reranker will return indices
+            # relative to the `documents` list, so use len(documents)-1.
+            index_mapping[len(documents) - 1] = ctx
         
         return documents, index_mapping
 
@@ -108,6 +111,9 @@ class EnhancedQueryEngine:
         context_parts = []
         
         for idx, ctx in enumerate(contexts, 1):
+            # Defensive: skip None contexts
+            if ctx is None:
+                continue
             ku_type = ctx.get('ku_type', 'unknown')
             
             # Get content based on type
@@ -142,6 +148,9 @@ class EnhancedQueryEngine:
         sources = []
         
         for idx, ctx in enumerate(contexts, 1):
+            # Defensive: skip None contexts
+            if ctx is None:
+                continue
             source = {
                 "id": idx,
                 "ku_id": ctx.get("ku_id"),
