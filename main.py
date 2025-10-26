@@ -349,9 +349,9 @@ async def main():
     # ==================== CONFIGURATION ====================
     # Test papers for R&D automation
     SOURCES_TO_INGEST = [
-        {'type': 'pdf', 'path': 'documents/1706.03762v7.pdf'},
-        # {'type': 'pdf', 'path': 'documents/bert.pdf'},
-        # {'type': 'youtube', 'url': 'https://youtu.be/...'},  # Conference talk
+        # {'type': 'pdf', 'path': 'documents/1706.03762.pdf'},
+        {'type': 'website', 'path': 'https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl'},
+        # {'type': 'youtube', 'url': 'https://youtu.be/zxQyTK8quyY?si=3V5hXmhV0DXL6a8r'},  # Conference talk
     ]
     
     # R&D-focused queries
@@ -360,18 +360,6 @@ async def main():
             "question": "What is the self-attention mechanism and how is it computed?",
             "description": "Methodology inquiry"
         },
-        {
-            "question": "What are the key performance metrics reported in these papers?",
-            "description": "Results extraction"
-        },
-        {
-            "question": "Compare the model architectures across papers",
-            "description": "Comparative analysis"
-        },
-        {
-            "question": "What datasets were used for evaluation?",
-            "description": "Experimental setup"
-        }
     ]
     
     # Enable detailed logging for R&D
@@ -382,7 +370,7 @@ async def main():
     try:
         # Initialize system with VLM
         logger.info("\n" + "="*80)
-        logger.info("R&D MULTIMODAL RAG SYSTEM - VLM POWERED")
+        logger.info("R&D MULTIMODAL RAG SYSTEM ")
         logger.info("="*80)
         
         rag_system = await initialize_system()
@@ -528,36 +516,6 @@ async def main():
                         
                         logger.info(f"  → Saved results to {output_file}")
             
-            # Step 3: Generate research insights report
-            logger.info("\n" + "="*80)
-            logger.info("STEP 3: GENERATING RESEARCH INSIGHTS")
-            logger.info("="*80)
-            
-            insights = await generate_research_insights(rag_system)
-            print_research_insights(insights)
-            
-            # Step 4: Database statistics
-            logger.info("\n" + "="*80)
-            logger.info("STEP 4: DATABASE STATISTICS")
-            logger.info("="*80)
-            
-            stats = rag_system.pipeline.db.get_statistics()
-            
-            print(f"\nTotal Sources: {stats['total_sources']}")
-            print(f"Total Knowledge Units: {stats['total_kus']}")
-            
-            print(f"\nSources by Status:")
-            for status, count in stats['sources_by_status'].items():
-                print(f"  {status}: {count}")
-            
-            print(f"\nKUs by Type:")
-            for ku_type, count in stats['kus_by_type'].items():
-                print(f"  {ku_type}: {count}")
-            
-            print(f"\nKUs by Source Type:")
-            for source_type, count in stats['kus_by_source_type'].items():
-                print(f"  {source_type}: {count}")
-            
             print("\n" + "="*80)
 
     except Exception as e:
@@ -569,83 +527,6 @@ async def main():
             rag_system.pipeline.db.close()
         logger.info("System shutdown complete")
 
-
-    async def generate_research_insights(rag_system) -> Dict[str, Any]:
-        """
-        Generate aggregated research insights from ingested papers
-        """
-        insights = {
-            'total_papers': 0,
-            'methodologies': set(),
-            'datasets': set(),
-            'metrics': {},
-            'key_findings': []
-        }
-        
-        # Get all sources
-        sources = rag_system.pipeline.db.list_sources(status='completed')
-        insights['total_papers'] = len(sources)
-        
-        # Aggregate metadata from all KUs
-        for source in sources:
-            source_id = source['_id']
-            kus = rag_system.pipeline.db.get_kus_by_source(source_id)
-            
-            for ku in kus:
-                enriched = ku.get('enriched_content', {})
-                
-                # Extract research metadata if available
-                research_meta = enriched.get('research_metadata', {})
-                
-                if research_meta:
-                    # Methodologies
-                    methods = research_meta.get('methodology_keywords', [])
-                    insights['methodologies'].update(methods)
-                    
-                    # Datasets
-                    datasets = research_meta.get('datasets_mentioned', [])
-                    insights['datasets'].update(datasets)
-                    
-                    # Metrics
-                    metrics = research_meta.get('metrics_mentioned', {})
-                    for metric, value in metrics.items():
-                        if metric not in insights['metrics']:
-                            insights['metrics'][metric] = []
-                        insights['metrics'][metric].append(value)
-        
-        # Convert sets to lists for JSON serialization
-        insights['methodologies'] = list(insights['methodologies'])
-        insights['datasets'] = list(insights['datasets'])
-        
-        return insights
-
-
-    def print_research_insights(insights: Dict[str, Any]):
-        """Pretty print research insights"""
-        print("\n" + "="*80)
-        print("AGGREGATED RESEARCH INSIGHTS")
-        print("="*80)
-        
-        print(f"\nPapers Analyzed: {insights['total_papers']}")
-        
-        if insights['methodologies']:
-            print(f"\nMethodologies Mentioned:")
-            for method in sorted(insights['methodologies'])[:10]:  # Top 10
-                print(f"  • {method}")
-        
-        if insights['datasets']:
-            print(f"\nDatasets Mentioned:")
-            for dataset in sorted(insights['datasets'])[:10]:  # Top 10
-                print(f"  • {dataset}")
-        
-        if insights['metrics']:
-            print(f"\nPerformance Metrics:")
-            for metric, values in sorted(insights['metrics'].items())[:10]:
-                if values:
-                    avg_value = sum(values) / len(values)
-                    print(f"  • {metric}: {avg_value:.2f} (avg of {len(values)} mentions)")
-        
-        print("="*80)
 
 if __name__ == "__main__":
     asyncio.run(main())

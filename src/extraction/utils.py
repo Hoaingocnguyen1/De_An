@@ -369,27 +369,120 @@ class VideoUtils:
             return None
 
     @staticmethod
-    def transcribe_audio(audio_path: str, model_name: str) -> List[Dict]:
+    def transcribe_audio(
+        audio_path: str, 
+        model_name: str,
+        merge_all_segments: bool = False, 
+        group_segments: bool = True,
+        max_words_per_chunk: int = 10000,
+        max_duration_per_chunk: float = 300.0
+    ) -> List[Dict]:
+        """
+        Transcribes an audio file. Options to:
+        1. Merge all segments into a single transcript (`merge_all_segments=True`).
+        2. Group small segments into larger chunks (`group_segments=True`).
+        3. Return raw segments from Whisper.
+        """
         logger.info(f"Transcribing: {audio_path}")
         try:
             model = VideoUtils.load_model(model_name)
-            # Tối ưu: Bật batch_size lớn hơn nếu dùng GPU để tăng tốc
             transcribe_options = dict(task="transcribe", verbose=False)
             if _DEVICE == "cuda":
                 transcribe_options["batch_size"] = 16 
                 
             result = model.transcribe(audio_path, **transcribe_options)
-            logger.info(f"Transcription complete for: {audio_path}")
-            return result.get("segments", [])
+            raw_segments = result.get("segments", [])
+            
+            if not raw_segments:
+                logger.warning(f"Whisper returned no segments for: {audio_path}")
+                return []
+
+            logger.info(f"Transcription complete. Got {len(raw_segments)} raw segments.")
+
+            if merge_all_segments:
+                logger.info("Merging all segments into a single transcript...")
+                
+                # Nối toàn bộ text lại với nhau
+                full_text = " ".join(
+                    segment['text'].strip() for segment in raw_segments if segment.get('text')
+                )
+                
+                full_transcript = [{
+                    'id': 0,
+                    'text': full_text,
+                    'start': raw_segments[0]['start'],
+                    'end': raw_segments[-1]['end']
+                }]
+                
+                logger.info(f"✓ Created a single transcript with {len(full_text)} chars.")
+                return full_transcript
+
+            if group_segments:
+                logger.info("Grouping small segments into larger chunks...")
+                
+                grouped_segments = []
+                current_chunk = None
+
+                for segment in raw_segments:
+                    text = segment.get('text', '').strip()
+                    if not text:
+                        continue
+
+                    if current_chunk is None:
+                        current_chunk = {
+                            'id': len(grouped_segments),
+                            'text': text,
+                            'start': segment['start'],
+                            'end': segment['end'],
+                            'word_count': len(text.split())
+                        }
+                    else:
+                        new_word_count = current_chunk['word_count'] + len(text.split())
+                        new_duration = segment['end'] - current_chunk['start']
+                        
+                        if new_word_count <= max_words_per_chunk and new_duration <= max_duration_per_chunk:
+                            current_chunk['text'] += ' ' + text
+                            current_chunk['end'] = segment['end']
+                            current_chunk['word_count'] = new_word_count
+                        else:
+                            grouped_segments.append(current_chunk)
+                            current_chunk = {
+                                'id': len(grouped_segments),
+                                'text': text,
+                                'start': segment['start'],
+                                'end': segment['end'],
+                                'word_count': len(text.split())
+                            }
+                
+                if current_chunk:
+                    grouped_segments.append(current_chunk)
+                
+                logger.info(f"✓ Grouped into {len(grouped_segments)} meaningful chunks.")
+                return grouped_segments
+
+            return raw_segments
+
         except Exception as e:
             logger.error(f"Whisper transcription failed for {audio_path}: {e}")
             return []
+        
+    @staticmethod
+    def extract_video_id(url: str) -> Optional[str]:
+        """Extract YouTube video ID from URL"""
+        regex = r"(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^\"&?\/\s]{11})"
+        match = re.search(regex, url)
+        if match:
+            return match.group(1)
+        return None
+
     @staticmethod
     def get_youtube_transcript_direct(video_url: str) -> List[Dict]:
         if not YOUTUBE_TRANSCRIPT_AVAILABLE:
             logger.warning("YouTube Transcript API not available, falling back to audio download")
             return None
         
+        from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+
         try:
             video_id = VideoUtils.extract_video_id(video_url)
             
@@ -399,24 +492,15 @@ class VideoUtils:
             
             logger.info(f"Fetching transcript for video ID: {video_id}")
             
-            # Try to get transcript (priority: English -> any available language)
-            try:
-                transcript = YouTubeTranscriptApi.get_transcript(
-                    video_id, 
-                    languages=['en', 'en-US', 'en-GB']
-                )
-            except:
-                # If English not available, get any available transcript
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                transcript = transcript_list.find_generated_transcript(['en']).fetch()
+            transcript_data = YouTubeTranscriptApi().fetch(video_id=video_id)
             
-            if not transcript:
+            if not transcript_data:
                 logger.warning(f"No transcript available for {video_id}")
                 return None
             
             # Convert to Whisper-like format for compatibility
             segments = []
-            for idx, entry in enumerate(transcript):
+            for idx, entry in enumerate(transcript_data):
                 segments.append({
                     'id': idx,
                     'text': entry['text'],
@@ -428,8 +512,14 @@ class VideoUtils:
             logger.info(f"✓ Retrieved {len(segments)} transcript segments")
             return segments
             
+        except (TranscriptsDisabled, NoTranscriptFound) as e:
+            logger.error(f"Failed to get YouTube transcript for {video_url}: {e}")
+            return None
         except Exception as e:
+            # This will catch the AttributeError if list_transcripts doesn't exist
             logger.error(f"Failed to get YouTube transcript: {e}")
+            if "has no attribute 'list_transcripts'" in str(e):
+                logger.error("Please update the 'youtube-transcript-api' library: pip install --upgrade youtube-transcript-api")
             return None
     
 class WebsiteUtils:

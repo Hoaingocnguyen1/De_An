@@ -37,7 +37,11 @@ class ContentEnricher:
                 return item
             logger.error(f"self.client = {self.client}, type = {type(self.client)}")
             # Gọi phương thức tạo completion có cấu trúc
-            enrichment_result = await self.client.create_structured_completion(prompt=prompt, image=image)
+            enrichment_result = await self.client.create_structured_completion(
+                prompt=prompt,
+                response_model=EnrichmentOutput,
+                image=image
+            )
             if enrichment_result:
                 # Chuyển đổi đối tượng Pydantic thành dict để lưu
                 item.update({"enrichment": enrichment_result.model_dump(), "status": "success"})
