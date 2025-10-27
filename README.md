@@ -1,55 +1,103 @@
 # Multimodal RAG — Local Runner
 
-This repository contains an experimental research & development pipeline for a multimodal Retrieval-Augmented Generation (RAG) system. It supports ingesting PDFs (text, tables, figures), extracting structured layout with a VLM, falling back to pdfplumber for table extraction, enriching content with a structured LLM (Gemini), and creating text or multimodal embeddings (Voyage multmodal models). Knowledge units (KUs) are stored in MongoDB and can be queried with vector + hybrid search.
+This repository contains an experimental research and development pipeline for a multimodal Retrieval-Augmented Generation (RAG) system.
+It supports ingesting PDFs (text, tables, figures), extracting structured layout with a VLM, falling back to pdfplumber for table extraction, enriching content with a structured LLM (Gemini), and creating text or multimodal embeddings (Voyage multimodal models).
+Knowledge Units (KUs) are stored in MongoDB and can be queried using vector and hybrid search.
 
-Key features
-- PDF extraction: text, table, figure extraction via VLM with pdfplumber fallback for tables
-- Figure analysis: image analysis text is captured and included in multimodal embeddings so the analysis is retrievable by queries
-- Embeddings: text and multimodal embeddings with metadata (model name and embedding type) stored per KU
-- Gemini structured completions: Pydantic schemas converted to JSON Schema and patched to be accepted by the API
-- Resilient ingestion: unordered bulk inserts with duplicate-key handling
+---
 
-Who is this for
-- Engineers and researchers who want a locally runnable multimodal RAG research pipeline that integrates VLM layout parsing, structured LLM enrichments, and multimodal embeddings.
+## Key Features
 
-Requirements
-- Python 3.11
-- MongoDB (Atlas or local) — a vector index is required if you want to use MongoDB vector search
-- API keys for external services you intend to use (Voyage AI, Gemini, etc.)
+* **PDF Extraction:** Extract text, tables, and figures via VLM with pdfplumber fallback for tables.
+* **Figure Analysis:** Extract image analysis text and include it in multimodal embeddings for better retrieval.
+* **Embeddings:** Store text and multimodal embeddings with metadata (model name and embedding type) per KU.
+* **Structured Completions:** Use Gemini with Pydantic schemas converted to JSON Schema for structured enrichment.
+* **Resilient Ingestion:** Perform unordered bulk inserts with duplicate-key handling.
 
-Quick setup: See detail in QUICKSTART.md
+---
 
-Configuration: 
+## Who Is This For
+
+Researchers and engineers who want a **locally runnable multimodal RAG pipeline** that integrates:
+
+* VLM layout parsing
+* Structured LLM enrichments
+* Multimodal embeddings and retrieval
+
+---
+
+## Requirements
+
+* Python 3.11
+* MongoDB (Atlas or local) — a vector index is required for vector search
+* API keys for external services (Voyage AI, Gemini, etc.)
+
+Quick setup: See details in **QUICKSTART.md**
+
+---
+
+## Configuration
+
+**Configuration Overview:**
 ![Configuration Overview](images/config.png)
-PDF process: 
-- Text -> extract all -> chunk
-- Figure -> parser -> extract -> analysis (enrich) -> multimodal embedding
-- Table -> parser -> extract
-![alt text](images/pdf-process.png)
-Website: extract -> text chunk
-![alt text](images/link-process.png)
-Youtube link/video: extract through api transcript/ fall back download video -> STT model -> transcript -> text chunk
-![alt text](images/youtube-process.png)
-Storage MongoDB:
-- source collection:
-![alt text](images/source.png)
-- Knowledged unit collection:
-![alt text](images/kus.png)
-Query:
-![alt text](images/query-results.png)
-![alt text](images/retrieval-results.png)
 
+---
 
+## PDF Processing Pipeline
 
-Notes about the current codebase
-- Table extraction: the pipeline first uses the VLM to extract tables; when that fails or returns empty, a pdfplumber fallback is attempted.
-- VLMs aren’t very good at extracting complex tables. For harder cases, should combine them with OCR to improve text and layout accuracy.
-- Thầy thông cảm vì nhiều thành viên lạ tên trên github ạ, do em dùng máy khác nên v.
+* **Text:** extract → chunk
+* **Figure:** parse → extract → analyze (enrich) → multimodal embedding
+* **Table:** parse → extract
 
+![PDF Process](images/pdf-process.png)
 
-Future Improvements
-- Enhance layout and parser extraction
-- Define stricter schemas and validation
-- Refactor and clean up codebase
-- Fix automatic extract youtube transcript (faster than using whisper -> transcript)
-- Enhance visual-language queries
+---
+
+## Website Processing
+
+Extract → text chunk
+![Website Process](images/link-process.png)
+
+---
+
+## YouTube / Video Processing
+
+Extract through API transcript →
+Fallback: download video → speech-to-text model (STT) → transcript → text chunk
+
+![YouTube Process](images/youtube-process.png)
+
+---
+
+## MongoDB Storage
+
+**Source Collection:**
+![Source Collection](images/source.png)
+
+**Knowledge Unit Collection:**
+![Knowledge Units](images/kus.png)
+
+---
+
+## Query Results
+
+![Query Results](images/query-results.png)
+![Retrieval Results](images/retrieval-results.png)
+
+---
+
+## Notes About the Current Codebase
+
+* The pipeline first uses the VLM to extract tables; if that fails, pdfplumber is used as fallback.
+* VLMs are not yet good at extracting complex tables; for difficult cases, combine with OCR to improve text and layout accuracy.
+* Some GitHub contributor names may appear unusual due to work from different machines.
+
+---
+
+## Future Improvements
+
+* Improve layout and parser extraction
+* Define stricter schemas and validation
+* Refactor and clean up codebase
+* Fix automatic YouTube transcript extraction (faster than Whisper)
+* Enhance visual-language query capabilities
