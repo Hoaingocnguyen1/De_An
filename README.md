@@ -4,7 +4,6 @@ This repository contains an experimental research and development pipeline for a
 It supports ingesting PDFs (text, tables, figures), extracting structured layout with a VLM, falling back to pdfplumber for table extraction, enriching content with a structured LLM (Gemini), and creating text or multimodal embeddings (Voyage multimodal models).
 Knowledge Units (KUs) are stored in MongoDB and can be queried using vector and hybrid search.
 
----
 
 ## Key Features
 
@@ -14,7 +13,6 @@ Knowledge Units (KUs) are stored in MongoDB and can be queried using vector and 
 * **Structured Completions:** Use Gemini with Pydantic schemas converted to JSON Schema for structured enrichment.
 * **Resilient Ingestion:** Perform unordered bulk inserts with duplicate-key handling.
 
----
 
 ## Who Is This For
 
@@ -24,7 +22,6 @@ Researchers and engineers who want a **locally runnable multimodal RAG pipeline*
 * Structured LLM enrichments
 * Multimodal embeddings and retrieval
 
----
 
 ## Requirements
 
@@ -34,14 +31,12 @@ Researchers and engineers who want a **locally runnable multimodal RAG pipeline*
 
 Quick setup: See details in **QUICKSTART.md**
 
----
 
 ## Configuration
 
 **Configuration Overview:**
 ![Configuration Overview](images/config.png)
 
----
 
 ## PDF Processing Pipeline
 
@@ -51,14 +46,12 @@ Quick setup: See details in **QUICKSTART.md**
 
 ![PDF Process](images/pdf-process.png)
 
----
 
 ## Website Processing
 
 Extract → text chunk
 ![Website Process](images/link-process.png)
 
----
 
 ## YouTube / Video Processing
 
@@ -67,7 +60,6 @@ Fallback: download video → speech-to-text model (STT) → transcript → text 
 
 ![YouTube Process](images/youtube-process.png)
 
----
 
 ## MongoDB Storage
 
@@ -77,14 +69,12 @@ Fallback: download video → speech-to-text model (STT) → transcript → text 
 **Knowledge Unit Collection:**
 ![Knowledge Units](images/kus.png)
 
----
 
 ## Query Results
 
 ![Query Results](images/query-results.png)
 ![Retrieval Results](images/retrieval-results.png)
 
----
 
 ## Notes About the Current Codebase
 
@@ -92,7 +82,6 @@ Fallback: download video → speech-to-text model (STT) → transcript → text 
 * VLMs are not yet good at extracting complex tables; for difficult cases, combine with OCR to improve text and layout accuracy.
 * Some GitHub contributor names may appear unusual due to work from different machines.
 
----
 
 ## Future Improvements
 
