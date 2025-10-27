@@ -1,0 +1,60 @@
+{
+  "question": "Complexity per layer in Self-Attention (restricted) layer in transformer?",
+  "description": "Methodology inquiry",
+  "answer": "The computational complexity of a Self-Attention layer in a Transformer, particularly with the common restriction where query, key, and value dimensions are related to the model's embedding size and number of heads, can be determined by analyzing the matrix operations involved. This restriction, as specified in the original \"Attention Is All You Need\" paper, sets `d_q = d_k = d_v = d_model / h` (Source 5), where `d_model` is the embedding dimension and `h` is the number of attention heads.\n\nLet `L` be the sequence length (number of input tokens) and `d_model` be the dimension of the input embeddings (also referred to as `emb_size` in Source 2 and `d_model` in Source 5). The complexity per layer arises from the following main steps:\n\n1.  **Linear Projections for Query (Q), Key (K), and Value (V) Vectors:**\n    *   Each input vector of size `d_model` is transformed into query, key, and value vectors. For multi-head attention, the total weight matrices `W_Q, W_K, W_V` typically have dimensions `d_model x d_model` (Source 2, stating \"Kích thước trước khi chia của mỗi W_Q, W_K, W_V làm emb_size x emb_size\").\n    *   The input sequence `(L x d_model)` is multiplied by these three matrices. Each multiplication has a complexity of `L * d_model * d_model`.\n    *   Therefore, the total complexity for these projections is approximately `3 * O(L * d_model^2)` (Source 1 mentions these multiplications, and Source 2 provides their dimensions).\n\n2.  **Calculating Attention Scores (Q * K^T) for all Heads:**\n    *   After the initial projections, the Q, K, and V matrices are conceptually split into `h` heads (Source 4). For each head, the query matrix `(L x d_k)` is multiplied by the transposed key matrix `(d_k x L)`.\n    *   Given the restriction `d_k = d_model / h` (Source 5), the complexity for one head is `L * (d_model / h) * L = O(L^2 * d_model / h)`.\n    *   Since there are `h` heads, the total complexity for this step across all heads is `h * O(L^2 * d_model / h) = O(L^2 * d_model)`.\n\n3.  **Multiplying Attention Scores with Value Vectors (Attention_scores * V) for all Heads:**\n    *   For each head, the attention scores matrix `(L x L)` is multiplied by the value matrix `(L x d_v)`.\n    *   Given `d_v = d_model / h` (Source 5), the complexity for one head is `L * L * (d_model / h) = O(L^2 * d_model / h)`.\n    *   Across `h` heads, the total complexity is `h * O(L^2 * d_model / h) = O(L^2 * d_model)`.\n\n4.  **Final Linear Projection:**\n    *   The outputs from all `h` heads are concatenated back into an `(L x d_model)` matrix. This combined output is then multiplied by a final weight matrix `W_O`, which has dimensions `d_model x d_model`.\n    *   The complexity for this step is `L * d_model * d_model = O(L * d_model^2)`.\n\n**Overall Complexity:**\n\nCombining the dominant terms from these steps, the computational complexity per layer in a Self-Attention (restricted) layer in a Transformer is **O(L^2 * d_model + L * d_model^2)**.\n\nThis complexity arises from the initial linear transformations (`O(L * d_model^2)`) and the core attention mechanism involving matrix multiplications that are quadratic in sequence length (`O(L^2 * d_model)`). The restriction of `d_q = d_k = d_v = d_model / h` (Source 5) is crucial for this specific complexity derivation, as it ensures the per-head attention computations scale efficiently with `d_model / h`.",
+  "sources": [
+    {
+      "id": 1,
+      "ku_id": "website_68fed22decb803c197cdfc3d_text_10",
+      "source_uri": "https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl",
+      "ku_type": "text_chunk",
+      "score": 0.7436432242393494,
+      "rerank_score": "[Type: text_chunk] Sau khi xác định được các vector đầu vào, ta sẽ nhân từng vector với ba ma trận trọng số W_Q, W_K, Q_V để thu được các vector q, k, và v đã biến đổi. Thêm một câu hỏi đặt ra là: Tại sao chúng ta phải nhân các vector này với các ma trận trọng số? Chắc chắn là không phải làm cho vui rồi .Việc này không chỉ để giảm chiều vector đầu vào, giúp tối ưu hóa tính toán, mà quan trọng hơn, việc nhân với ma trận trọng số cho phép mô hình có thể học và cập nhật các trọng số này trong quá trình huấn luyện. Giúp mô hình cải thiện độ chính xác của self-attention trong các lần tính toán tiếp theo.\nKích thước của các ma trận trọng số được tính như sau:\n- Ma trận trọng số W_q: có kích thước d_q x d_model\n- Ma trận trọng số W_k: có kích thước d_k x d_model\n- Ma trận trọng số W_v: có kích thước d_q x d_model\nTrong đó:\n- d_model là kích thước của mỗi vector đầu vào\n- d_q, d_k là kích thước của các vector truy vấn (query) và khóa (key) d_q = d_k",
+      "preview": "Sau khi xác định được các vector đầu vào, ta sẽ nhân từng vector với ba ma trận trọng số W_Q, W_K, Q_V để thu được các vector q, k, và v đã biến đổi. ..."
+    },
+    {
+      "id": 2,
+      "ku_id": "website_68fed22decb803c197cdfc3d_text_18",
+      "source_uri": "https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl",
+      "ku_type": "text_chunk",
+      "score": 0.6517646312713623,
+      "rerank_score": "[Type: text_chunk] Tiếp theo chúng ta cần tính toán chiều của các ma trận W_Q, W_K, W_V cho mỗi head.\n- Kích thước trước khi chia của mỗi W_Q, W_K, W_V làm emb_size x emb_size ( chọn kích thước này để chiều của Q, K , V cùng chiều cới vector đầu vào)emb_size\n- Kich thước của W_Q, W_K, W_V khi chia cho mỗi đầu = emb_size) x (d_q x heads)\nMặc ma trân W_Q là một ma trận duy nhất, chúng ta có thể coi nó như là 'xếp chồng' các W_Q của mỗi head .\nBây giờ chúng ta cần định hình lại kích thước các ma trận Q,K, V. Ban đầu sau khi đi qua W_Q, W_K, W_V, các ma trận Q,K, V của chúng ta có chiều seq x emb (số câu x số chiều mỗi từ) trong ví dụ này là 4 x 6. Vì có 2 head nên chia 2 phần theo chiều embedding để mỗi chiều xử lí thông tin của một từ. Giả sử ta có embedding của \"You are welcome\"\nYou\n:[0.205, 0.352, 0.625, 0.256, 0.967, 0.423]\nare\n:[0.501, 0.750, 0.817, 0.609, 0.6057, 0.637]\nwelcome\n:[0.080, 0.948, 0.696, 0.444, 0.376, 0.132]\nPAD\n:[0. , 0. , 0. , 0. , 0. , 0. ]",
+      "preview": "Tiếp theo chúng ta cần tính toán chiều của các ma trận W_Q, W_K, W_V cho mỗi head.\n- Kích thước trước khi chia của mỗi W_Q, W_K, W_V làm emb_size x em..."
+    },
+    {
+      "id": 3,
+      "ku_id": "pdf_68fed1f6ecb803c197cdfc39_text_chunk_0",
+      "source_uri": "documents/1706.03762.pdf",
+      "ku_type": "text_chunk",
+      "score": 0.7262123823165894,
+      "rerank_score": "[Type: text_chunk] The text describes the overall architecture of the Transformer model, which utilizes stacked self-attention and fully connected layers for its encoder and decoder. It details the encoder's structure, consisting of N=6 identical layers, each with a multi-head self-attention mechanism and a position-wise feed-forward network, incorporating residual connections and layer normalization.",
+      "page": 1,
+      "preview": "The text describes the overall architecture of the Transformer model, which utilizes stacked self-attention and fully connected layers for its encoder..."
+    },
+    {
+      "id": 4,
+      "ku_id": "website_68fed22decb803c197cdfc3d_text_17",
+      "source_uri": "https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl",
+      "ku_type": "text_chunk",
+      "score": 0.691227912902832,
+      "rerank_score": "[Type: text_chunk] - Kích thước embedding ở ví dụ này chúng ta đặt là 1x6 ( hay d_model = 6)\n- d_Q = d_K = d_V trong ví dụ này là 3\n- Số lượng Attention heads trong ví dụ này là 2\nBước tiếp là chúng ta cần chia dữ liệu thành nhiều head attention để mỗi head có thể xử lí riêng biệt. Ở đây, việc chia chỉ là chia về mặt logic. Thực tế vector đầu vào không được phân chia vật lý thành các ma trận riêng biệt một cho mỗi head . Tương tự như vậy, không chia vật lý cho các ma trận W_Q, W_K, W_V, riêng biệt một cho mỗi head. Tất cả các head chia sẻ cùng một ma trận W_Q, W_K, W_Vớp Linear nhưng chỉ đơn giản là hoạt động trên phần logic 'riêng' của của chúng. (Nếu chia vật lý, giả sử có n đầu thì có tới 3n ma trận trọng số việc này không hiệu qua trong quá trình cập nhật trọng số về sau).\nTiếp theo chúng ta cần tính toán chiều của các ma trận W_Q, W_K, W_V cho mỗi head.",
+      "preview": "- Kích thước embedding ở ví dụ này chúng ta đặt là 1x6 ( hay d_model = 6)\n- d_Q = d_K = d_V trong ví dụ này là 3\n- Số lượng Attention heads trong ví d..."
+    },
+    {
+      "id": 5,
+      "ku_id": "website_68fed22decb803c197cdfc3d_text_11",
+      "source_uri": "https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl",
+      "ku_type": "text_chunk",
+      "score": 0.7295814156532288,
+      "rerank_score": "[Type: text_chunk] - Ma trận trọng số W_v: có kích thước d_q x d_model\nTrong đó:\n- d_model là kích thước của mỗi vector đầu vào\n- d_q, d_k là kích thước của các vector truy vấn (query) và khóa (key) d_q = d_k\n- d_v là kích thước của vector giá trị (value) và có thể khác với d_q và d_k.\n- trong bài báo Attention Is All You Need họ chọn chiều d_q = d_k = d_v = d_model / h (h là số lượng đầu (heads) trong cơ chế multi-head attention.)\nTrong ví dụ trên 2 từ \"Thinking\" và \"Machines\" sau khi cộng embedding với positional encoding tương ứng ta thu được 2 vector đầu vào là x1và x2. Sau khi nhân lần lượt với các ma trận trọng số W_q, W_k, W_v ( các ma trận này ban đầu được khởi tạo ngẫu nhiên) ta được lần lượt các vector q1, k1, v1 cho từ \"Thinking\" và q2,k2,v2 cho từ \"Machines\".\nBước thứ hai để tính self-attention là tính điểm, với từ “Thinking”. Ta cần tính điểm cho mỗi từ trong câu đầu vào so với từ này. Điểm sẽ quyết định cần chú ý bao nhiêu vào các phần khác của câu đầu vào khi ta đang mã hóa một từ cụ thể.",
+      "preview": "- Ma trận trọng số W_v: có kích thước d_q x d_model\nTrong đó:\n- d_model là kích thước của mỗi vector đầu vào\n- d_q, d_k là kích thước của các vector t..."
+    }
+  ],
+  "stats": {
+    "initial_candidates": 20,
+    "reranked_results": 5,
+    "vector_search_model": "voyage-3",
+    "rerank_model": "rerank-2.5",
+    "synthesis_model": "GeminiClient"
+  }
+}

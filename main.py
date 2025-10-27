@@ -357,22 +357,22 @@ async def main():
     # ==================== CONFIGURATION ====================
     # Test papers for R&D automation
     SOURCES_TO_INGEST = [
-        {'type': 'pdf', 'path': 'documents/1706.037621.pdf'},
+        # {'type': 'pdf', 'path': 'documents/1706.037621.pdf'},
         {'type': 'pdf', 'path': 'documents/1706.03762.pdf'},
-        # {'type': 'website', 'path': 'https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl'},
-        # {'type': 'youtube', 'url': 'https://youtu.be/zxQyTK8quyY?si=3V5hXmhV0DXL6a8r'}, 
+        {'type': 'website', 'path': 'https://viblo.asia/p/self-attention-va-multi-head-sefl-attention-trong-transformers-n1j4lO2aVwl'},
+        {'type': 'youtube', 'url': 'https://youtu.be/zxQyTK8quyY?si=3V5hXmhV0DXL6a8r'}, 
     ]
     
     # R&D-focused queries
     RESEARCH_QUERIES = [
-        # {
-        #     "question": "Complexity per layer in Self-Attention (restricted) layer in transformer?",
-        #     "description": "Methodology inquiry"
-        # },
-        # {
-        #     "question": "How self-attention works?",
-        #     "description": "Methodology inquiry"
-        # },
+        {
+            "question": "Complexity per layer in Self-Attention (restricted) layer in transformer?",
+            "description": "Methodology inquiry"
+        },
+        {
+            "question": "How self-attention works?",
+            "description": "Methodology inquiry"
+        },
         {
             "question": "Transformer architecture?",
             "description": "Methodology inquiry"
