@@ -365,14 +365,14 @@ async def main():
     
     # R&D-focused queries
     RESEARCH_QUERIES = [
-        {
-            "question": "Complexity per layer in Self-Attention (restricted) layer in transformer?",
-            "description": "Methodology inquiry"
-        },
-        {
-            "question": "How self-attention works?",
-            "description": "Methodology inquiry"
-        },
+        # {
+        #     "question": "Complexity per layer in Self-Attention (restricted) layer in transformer?",
+        #     "description": "Methodology inquiry"
+        # },
+        # {
+        #     "question": "How self-attention works?",
+        #     "description": "Methodology inquiry"
+        # },
         {
             "question": "Transformer architecture?",
             "description": "Methodology inquiry"

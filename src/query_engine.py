@@ -109,60 +109,58 @@ class EnhancedQueryEngine:
         return documents, index_mapping
 
     def _format_context_for_synthesis(self, contexts: List[Dict]) -> str:
-        """Create a concise, readable context string for LLM synthesis"""
+        """Format contexts for LLM with rich figure information"""
         context_parts = []
         
         for idx, ctx in enumerate(contexts, 1):
-            # Defensive: skip None contexts
             if ctx is None:
                 continue
+                
             ku_type = ctx.get('ku_type', 'unknown')
-            
-            # Get content based on type
             raw_content = ctx.get('raw_content') or {}
             enriched = ctx.get('enriched_content') or {}
             
-            # Build context section
             header = f"[Source {idx}] Type: {ku_type.upper()}"
             
-            # Add page/time context if available
+            # Add page/time context
             context_meta = ctx.get('context') or {}
             if page := context_meta.get('page_number'):
                 header += f" | Page: {page}"
-            if start_time := context_meta.get('start_time_seconds'):
-                header += f" | Time: {start_time:.1f}s"
             
-            # Get content - prioritize enriched, then raw
-            content = enriched.get('summary', '')
-            
-            # FIX: For figures, include VLM analysis if available
+            # ENHANCED: Rich figure context
             if ku_type == 'figure':
                 caption = context_meta.get('caption', '')
                 analysis = raw_content.get('analysis', {})
                 
+                content_parts = [f"Figure: {caption}"]
+                
+                # Add VLM findings
                 if analysis:
-                    # Extract key findings from VLM analysis
                     findings = analysis.get('raw_findings', [])
-                    numerical_data = analysis.get('numerical_data', [])
-                    
                     if findings:
-                        findings_text = "\n".join(f"- {f}" for f in findings[:3])
-                        content = f"Figure: {caption}\n\nKey Findings:\n{findings_text}"
+                        content_parts.append("\nKey Observations:")
+                        for f in findings[:3]:
+                            content_parts.append(f"  • {f}")
                     
+                    # Add numerical data
+                    numerical_data = analysis.get('numerical_data', [])
                     if numerical_data:
-                        data_text = ", ".join([
-                            f"{nd.get('label')}: {nd.get('value')}{nd.get('unit', '')}" 
-                            for nd in numerical_data[:3]
-                        ])
-                        content += f"\n\nNumerical Data: {data_text}"
-                elif not content:
-                    content = caption or "Figure content"
+                        content_parts.append("\nQuantitative Data:")
+                        for nd in numerical_data[:3]:
+                            content_parts.append(
+                                f"  • {nd.get('label')}: {nd.get('value')}{nd.get('unit', '')}"
+                            )
+                
+                # Add enriched summary if available
+                if enriched.get('summary'):
+                    content_parts.append(f"\nAnalysis: {enriched['summary']}")
+                
+                content = "\n".join(content_parts)
+            else:
+                # Text/table content (existing logic)
+                content = enriched.get('summary', '') or raw_content.get('text', '')[:500]
             
-            # Fallback to raw text if no enriched content
-            if not content:
-                content = raw_content.get('text', '')[:500]
-            
-            # Add keywords if available
+            # Add keywords
             keywords = enriched.get('keywords', [])
             keywords_str = f"\nKeywords: {', '.join(keywords)}" if keywords else ""
             

@@ -258,26 +258,32 @@ class OptimizedPipeline:
         figure_kus = []
         for figure in figures_detected:
             try:
+                # Pass full analysis dict to enrichment
                 enrichment = await self._enrich_figure(figure)
+                
+                #Pass analysis to embedder
                 emb_data = self.embedder.embed_figure(
-                    figure['image_data'], figure['caption'], enrichment.get('summary','')
+                    figure['image_data'],
+                    figure['caption'],
+                    enrichment.get('summary', ''),
+                    analysis=figure.get('analysis') 
                 )
+                
                 if emb_data['vector']:
-                    # Save preview/analysis in raw_content so it is retrievable during multimodal queries
                     figure_kus.append({
                         'type': 'figure',
                         'page': figure['page'],
                         'caption': figure.get('caption', ''),
                         'raw_content': {
                             'caption': figure.get('caption', ''),
-                            'analysis': figure.get('analysis', {}),
+                            'analysis': figure.get('analysis', {}),  #  Store for retrieval
                             'asset_uri': None
                         },
                         'enrichment': enrichment,
                         'embeddings': {
                             'vector': emb_data['vector'],
-                            'model': emb_data.get('model') if isinstance(emb_data, dict) else None,
-                            'type': emb_data.get('embedding_type') if isinstance(emb_data, dict) else None
+                            'model': emb_data.get('model'),
+                            'type': emb_data.get('embedding_type')  # "multimodal" or "text"
                         }
                     })
             except Exception as e:

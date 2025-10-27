@@ -154,30 +154,68 @@ class ContentEmbedder:
         self,
         image: Image.Image,
         caption: str = "",
-        summary: str = ""
+        summary: str = "",
+        analysis: Optional[Dict] = None  # ✅ NEW: VLM analysis data
     ) -> Dict[str, Any]:
-        """Create embedding for a figure using multimodal model"""
-        text_description = f"Figure Caption: {caption}\n\nDetailed Analysis: {summary}"
+        """
+        Create MULTIMODAL embedding for figure combining:
+        1. Visual features from the image
+        2. Textual analysis from VLM
         
-        # Try multimodal embedding first
+        This allows queries like:
+        - "Show me bar charts about accuracy" (visual search)
+        - "Find figures showing performance improvements" (semantic search)
+        """
+        
+        # Build rich text description from VLM analysis
+        text_parts = []
+        
+        if caption:
+            text_parts.append(f"Caption: {caption}")
+        
+        if summary:
+            text_parts.append(f"Summary: {summary}")
+        
+        # ✅ Extract key findings from VLM analysis
+        if analysis:
+            findings = analysis.get('raw_findings', [])
+            if findings:
+                text_parts.append("Key Findings: " + "; ".join(findings[:3]))
+            
+            # Add numerical data context
+            numerical_data = analysis.get('numerical_data', [])
+            if numerical_data:
+                data_str = ", ".join([
+                    f"{nd.get('label')}: {nd.get('value')}{nd.get('unit', '')}"
+                    for nd in numerical_data[:3]
+                ])
+                text_parts.append(f"Data: {data_str}")
+        
+        combined_text = "\n".join(text_parts)
+        
+        # ✅ CRITICAL: Use multimodal embedding with BOTH image and text
         vector = self.multimodal_embedder.embed_table_with_image(
-            table_image=image,
-            table_text=text_description
+            table_image=image,      # Visual features from original image
+            table_text=combined_text  # Semantic context from VLM
         )
         
-        # Fallback to text embedding if multimodal fails
+        # Fallback to text-only if multimodal fails
         if not vector:
-            logger.warning("Multimodal embedding failed, falling back to text embedding")
-            vector = self.text_embedder.embed(text_description)
-        embedding_type = "multimodal" if vector and len(vector) > 0 and self.multimodal_embedder else "text"
-        model_used = self.multimodal_embedder.model_name if embedding_type == "multimodal" else self.text_embedder.model_name
+            logger.warning("Multimodal embedding failed, falling back to text-only")
+            vector = self.text_embedder.embed(combined_text)
+            embedding_type = "text"
+            model_used = self.text_embedder.model_name
+        else:
+            embedding_type = "multimodal"
+            model_used = self.multimodal_embedder.model_name
 
         return {
             "vector": vector,
-            "source_text": text_description,
+            "source_text": combined_text,  # For retrieval display
             "embedding_type": embedding_type,
             "model": model_used
         }
+
 
     def embed_table(
         self,
