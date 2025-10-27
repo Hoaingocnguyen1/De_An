@@ -83,6 +83,7 @@ Fallback: download video → speech-to-text model (STT) → transcript → text 
 * Some GitHub contributor names may appear unusual due to work from different machines.
 
 
+
 ## Future Improvements
 
 * Improve layout and parser extraction
