@@ -132,10 +132,35 @@ class EnhancedQueryEngine:
             if start_time := context_meta.get('start_time_seconds'):
                 header += f" | Time: {start_time:.1f}s"
             
-            # Add enriched summary if available
+            # Get content - prioritize enriched, then raw
             content = enriched.get('summary', '')
+            
+            # FIX: For figures, include VLM analysis if available
+            if ku_type == 'figure':
+                caption = context_meta.get('caption', '')
+                analysis = raw_content.get('analysis', {})
+                
+                if analysis:
+                    # Extract key findings from VLM analysis
+                    findings = analysis.get('raw_findings', [])
+                    numerical_data = analysis.get('numerical_data', [])
+                    
+                    if findings:
+                        findings_text = "\n".join(f"- {f}" for f in findings[:3])
+                        content = f"Figure: {caption}\n\nKey Findings:\n{findings_text}"
+                    
+                    if numerical_data:
+                        data_text = ", ".join([
+                            f"{nd.get('label')}: {nd.get('value')}{nd.get('unit', '')}" 
+                            for nd in numerical_data[:3]
+                        ])
+                        content += f"\n\nNumerical Data: {data_text}"
+                elif not content:
+                    content = caption or "Figure content"
+            
+            # Fallback to raw text if no enriched content
             if not content:
-                content = raw_content.get('source_text_for_embedding', '')[:500]
+                content = raw_content.get('text', '')[:500]
             
             # Add keywords if available
             keywords = enriched.get('keywords', [])
@@ -169,14 +194,23 @@ class EnhancedQueryEngine:
             if start_time := context_meta.get('start_time_seconds'):
                 source['timestamp'] = f"{int(start_time // 60)}:{int(start_time % 60):02d}"
             
-            # Add preview
+            # Add preview based on type
             raw_content = ctx.get('raw_content') or {}
             enriched = ctx.get('enriched_content') or {}
             
-            preview = (
-                enriched.get('summary', '') or
-                raw_content.get('source_text_for_embedding', '')
-            )[:150]
+            # For figures, show analysis preview
+            if ctx.get('ku_type') == 'figure':
+                analysis = raw_content.get('analysis', {})
+                if analysis and analysis.get('raw_findings'):
+                    preview = analysis['raw_findings'][0][:150]
+                else:
+                    preview = context_meta.get('caption', 'Figure')[:150]
+            else:
+                preview = (
+                    enriched.get('summary', '') or
+                    raw_content.get('text', '')
+                )[:150]
+            
             source['preview'] = preview + "..." if len(preview) == 150 else preview
             
             sources.append(source)

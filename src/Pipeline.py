@@ -619,14 +619,25 @@ class OptimizedPipeline:
                 # copy extraction metadata if available
                 if obj.get('metadata'):
                     ku['raw_content']['metadata'] = obj.get('metadata')
-            elif obj_type == 'figure':
-                ku['context']['figure_id'] = obj.get('figure_id') or (obj.get('raw_content') or {}).get('figure_id')
-                ku['context']['caption'] = obj.get('caption') or (obj.get('raw_content') or {}).get('caption')
-                ku['raw_content']['analysis'] = (obj.get('raw_content') or {}).get('analysis') or obj.get('analysis')
-                ku['context']['dimensions'] = {
-                    'width': obj.get('width') or (obj.get('raw_content') or {}).get('width'),
-                    'height': obj.get('height') or (obj.get('raw_content') or {}).get('height')
-                }
+                elif obj_type == 'figure':
+                        ku['context']['figure_id'] = obj.get('figure_id') or (obj.get('raw_content') or {}).get('figure_id')
+                        ku['context']['caption'] = obj.get('caption') or (obj.get('raw_content') or {}).get('caption')
+                        
+                        # Copy analysis to raw_content for retrieval
+                        analysis = (obj.get('raw_content') or {}).get('analysis') or obj.get('analysis')
+                        if analysis:
+                            ku['raw_content']['analysis'] = analysis
+                            # Also store as source_text_for_embedding for easier retrieval
+                            if not ku['raw_content'].get('text'):
+                                # Combine caption and analysis findings
+                                caption = ku['context'].get('caption', '')
+                                findings = "\n".join(analysis.get('raw_findings', []))
+                                ku['raw_content']['text'] = f"{caption}\n\nFindings:\n{findings}"
+                        
+                        ku['context']['dimensions'] = {
+                            'width': obj.get('width') or (obj.get('raw_content') or {}).get('width'),
+                            'height': obj.get('height') or (obj.get('raw_content') or {}).get('height')
+                        }
             
             kus.append(ku)
         
