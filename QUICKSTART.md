@@ -1,15 +1,4 @@
-# 🚀 Quick Start Guide
-
-Get your Multimodal RAG system running in **5 minutes**!
-
-## 📋 Prerequisites Checklist
-
-- [ ] Python 3.9+ installed
-- [ ] MongoDB Atlas account created
-- [ ] Voyage AI API key obtained
-- [ ] Google Gemini API key obtained
-- [ ] Alibaba DashScope API key obtained
-
+# Quick Start Guide
 # QUICKSTART
 
 These are the minimal steps to run this Multimodal RAG project locally on Windows using PowerShell and Python 3.11.
@@ -87,15 +76,3 @@ python main.py
 Outputs
 - Knowledge units (KUs) are written to MongoDB (see `src/storage/MongoDBHandler.py`).
 - Query results are saved under `output/queries/` when you run the query flow.
-
-Troubleshooting hints
-- If ingestion raises duplicate-key BulkWriteError, the pipeline performs unordered bulk inserts and will continue; check logs to see if some KUs were skipped.
-- If VLM table extraction fails for a PDF, the pipeline includes a pdfplumber fallback — try ingesting that PDF and check logs for the fallback path.
-- For PowerShell activation issues you may need to set your execution policy:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
-
-Further reading
-- See `README.md` for a longer description, env var list, and troubleshooting steps.
