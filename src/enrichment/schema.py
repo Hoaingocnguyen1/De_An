@@ -102,6 +102,12 @@ class ResearchMetadata(BaseModel):
 
 class EnrichmentOutput(BaseModel):
     """Enrichment with research metadata"""
-    summary: str
-    keywords: List[str]
-    research_metadata: Optional[ResearchMetadata]
+    summary: str = Field(description="Concise summary of the content")
+    keywords: List[str] = Field(
+        default=[],
+        description="Key keywords/concepts (can be empty list)"
+    )
+    research_metadata: Optional[ResearchMetadata] = Field(
+        default=None,
+        description="Optional research-specific metadata"
+    )

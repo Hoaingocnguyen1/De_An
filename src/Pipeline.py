@@ -294,41 +294,110 @@ class OptimizedPipeline:
         return self._create_knowledge_units(all_kus, source_id, "pdf", source_uri)
 
     async def _enrich_text_chunk(self, text):
-        result = await self.enricher.enrich_batch([{"type":"text","data":text}])
-        return result[0].get('enrichment') if result else {}
+            """Enrich text chunk with error handling"""
+            try:
+                result = await self.enricher.enrich_batch([{
+                    "type": "text",
+                    "data": text
+                }])
+                
+                if result and len(result) > 0:
+                    enrichment = result[0].get('enrichment')
+                    if enrichment:
+                        return enrichment
+                
+                # Fallback if enrichment failed
+                logger.warning("Text enrichment failed, using fallback")
+                return {
+                    'summary': text[:200],
+                    'keywords': [],
+                    'research_metadata': None
+                }
+                
+            except Exception as e:
+                logger.error(f"Text enrichment error: {e}")
+                return {
+                    'summary': text[:200],
+                    'keywords': [],
+                    'research_metadata': None
+                }
 
     async def _enrich_table(self, table_data):
-        """Enrich table summary (VLM đã extract structure)"""
+        """Enrich table summary with error handling"""
         try:
             # Handle empty table
             if not table_data.get('data'):
-                return {'summary': 'Empty table', 'keywords': []}
+                return {
+                    'summary': 'Empty table',
+                    'keywords': [],
+                    'research_metadata': None
+                }
             
-            df = pd.DataFrame(table_data['data'])
+            # Convert to string representation
+            try:
+                df = pd.DataFrame(table_data['data'])
+                df_str = df.to_string(max_rows=20, index=False)
+            except Exception:
+                df_str = str(table_data['data'])[:500]
             
-            # Use to_string instead of to_markdown (no tabulate needed)
-            df_str = df.to_string(max_rows=20, index=False)
+            # Enrich with LLM
+            result = await self.enricher.enrich_batch([{
+                "type": "table",
+                "data": table_data['data'],
+                "caption": table_data.get('caption', '')
+            }])
             
-            prompt = f"Summarize key findings from this table:\n\n{df_str[:500]}"
+            if result and len(result) > 0:
+                enrichment = result[0].get('enrichment')
+                if enrichment:
+                    return enrichment
             
-            result = await self.enricher.client.create_structured_completion(
-                prompt=prompt, response_model=EnrichmentOutput
-            )
+            # Fallback
+            return {
+                'summary': f"Table with {len(table_data.get('data', []))} rows",
+                'keywords': [],
+                'research_metadata': None
+            }
             
-            return result.model_dump() if result else {'summary': '', 'keywords': []}
-        
         except Exception as e:
             logger.error(f"Table enrichment failed: {e}")
-            return {'summary': '', 'keywords': []}
+            return {
+                'summary': 'Table content',
+                'keywords': [],
+                'research_metadata': None
+            }
 
     async def _enrich_figure(self, figure_data):
-        """Enrich figure summary (VLM đã analyze)"""
-        # VLM analysis đã có rồi, chỉ cần tóm tắt lại
-        findings = "\n".join(figure_data['key_findings'])
-        return {
-            'summary': findings[:300],
-            'keywords': [str(nd['label']) for nd in figure_data['numerical_data'][:5]]
-        }
+        """Enrich figure with error handling"""
+        try:
+            # Use VLM analysis if available
+            findings = "\n".join(figure_data.get('key_findings', []))
+            
+            if findings:
+                return {
+                    'summary': findings[:300],
+                    'keywords': [
+                        str(nd.get('label', '')) 
+                        for nd in figure_data.get('numerical_data', [])[:5]
+                    ],
+                    'research_metadata': None
+                }
+            
+            # Fallback to caption
+            caption = figure_data.get('caption', 'Figure')
+            return {
+                'summary': caption[:300],
+                'keywords': [],
+                'research_metadata': None
+            }
+            
+        except Exception as e:
+            logger.error(f"Figure enrichment failed: {e}")
+            return {
+                'summary': 'Figure content',
+                'keywords': [],
+                'research_metadata': None
+            }
     
     async def _process_youtube(
         self,
@@ -532,7 +601,7 @@ class OptimizedPipeline:
                 "enriched_content": {
                     "summary": enrichment.get('summary'),
                     "keywords": enrichment.get('keywords', []),
-                    "analysis_model": "gemini-2.5-pro"
+                    "analysis_model": "gemini-2.5-flash"
                 } if enrichment else None,
                 "embeddings": {
                     "vector": (obj.get('embeddings') or {}).get('vector') or obj.get('embedding_vector') or obj.get('vector') or [],

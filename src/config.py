@@ -40,9 +40,9 @@ class VoyageConfig(BaseModel):
 
 
 class GeminiConfig(BaseModel):
-    """Gemini configuration with vision support"""
+    """Gemini configuration via OpenAI SDK"""
     api_key: str = Field(..., description="Gemini API key")
-    model_name: str = "gemini-2.5-flash"    
+    model_name: str = Field(default="gemini-2.0-flash-exp")
     
     # Generation settings
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -63,18 +63,19 @@ class GeminiConfig(BaseModel):
     @classmethod
     def validate_api_key(cls, v):
         if not v or not v.startswith('AIzaSy'):
-            raise ValueError("Invalid Gemini API key")
+            raise ValueError("Invalid Gemini API key format")
         return v
 
 
 class ProcessingConfig(BaseModel):
+    """Processing configuration"""
     max_workers: int = Field(default=4, ge=1, le=32)
     batch_size: int = Field(default=16, ge=1, le=128)
     
-    # VLM bắt buộc cho layout detection
-    use_vlm_detection: bool = Field(default=True, description="Use VLM to detect tables/figures")
+    # VLM for layout detection (required)
+    use_vlm_detection: bool = Field(default=True)
     
-    # Whisper
+    # Whisper model
     whisper_model: Literal["tiny", "base", "small", "medium", "large"] = Field(default="base")
     max_concurrent_enrichment: int = Field(default=10, ge=1, le=50)
 
@@ -96,7 +97,7 @@ class PathConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Main configuration class combining all sub-configs"""
+    """Main configuration class"""
     database: DatabaseConfig
     voyage: VoyageConfig
     gemini: GeminiConfig
@@ -121,14 +122,14 @@ class Config(BaseModel):
             ),
             gemini=GeminiConfig(
                 api_key=os.getenv("GEMINI_API_KEY", ""),
-                model_name=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+                model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
                 temperature=float(os.getenv("GEMINI_TEMPERATURE", "0.7")),
                 max_output_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "8192"))
             ),
             processing=ProcessingConfig(
                 max_workers=int(os.getenv("MAX_WORKERS", "4")),
                 batch_size=int(os.getenv("BATCH_SIZE", "16")),
-                use_layoutparser=os.getenv("USE_LAYOUTPARSER", "false").lower() == "true",
+                use_vlm_detection=os.getenv("USE_VLM_DETECTION", "true").lower() == "true",
                 whisper_model=os.getenv("WHISPER_MODEL", "base"),
                 max_concurrent_enrichment=int(os.getenv("MAX_CONCURRENT_ENRICHMENT", "10"))
             ),
@@ -147,17 +148,16 @@ class Config(BaseModel):
         )
     
     def validate_all(self) -> list[str]:
-        """Validate all configurations and return list of errors"""
+        """Validate all configurations"""
         errors = []
         
-        # Check required API keys
-        if not self.voyage.api_key or self.voyage.api_key == "":
+        if not self.voyage.api_key:
             errors.append("VOYAGE_API_KEY is not set")
         
-        if not self.gemini.api_key or self.gemini.api_key == "":
+        if not self.gemini.api_key:
             errors.append("GEMINI_API_KEY is not set")
         
-        if not self.database.uri or self.database.uri == "":
+        if not self.database.uri:
             errors.append("MONGO_URI is not set")
         
         return errors
@@ -177,14 +177,16 @@ class Config(BaseModel):
         print(f"  - Multimodal Model: {self.voyage.multimodal_model}")
         print(f"  - Rerank Model: {self.voyage.rerank_model}")
         
-        print(f"\n Gemini:")
+        print(f"\n Gemini (via OpenAI SDK):")
         print(f"  - Model: {self.gemini.model_name}")
         print(f"  - Temperature: {self.gemini.temperature}")
+        print(f"  - Using OpenAI SDK for structured outputs ✓")
         
         print(f"\n  Processing:")
         print(f"  - Workers: {self.processing.max_workers}")
         print(f"  - Batch Size: {self.processing.batch_size}")
         print(f"  - Whisper Model: {self.processing.whisper_model}")
+        print(f"  - VLM Detection: {'Enabled' if self.processing.use_vlm_detection else 'Disabled'}")
         
         print(f"\n Query:")
         print(f"  - Cache Enabled: {self.query.use_cache}")

@@ -49,7 +49,7 @@ except ImportError:
     logger.warning("youtube-transcript-api not installed. Install with: pip install youtube-transcript-api")
 
 class PDFUtils:
-    """PDF utilities with complete Windows LayoutParser fix"""
+    """PDF utilities with complete error handling and improved extraction"""
     
     # _layout_model = None
     _init_attempted = False
@@ -91,6 +91,7 @@ class PDFUtils:
     3. Count rows and columns accurately
     4. Set has_merged_cells to true if you see merged cells
     5. Set extraction_confidence between 0.0 and 1.0
+    6. Since almost all tables don't have vertical lines, please be careful when identifying columns.
 
     IMPORTANT: You MUST return a valid JSON object with all fields, even if the table is difficult to read.
     """

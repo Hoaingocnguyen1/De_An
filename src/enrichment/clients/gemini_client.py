@@ -1,14 +1,16 @@
-import google.generativeai as genai
+"""
+src/enrichment/clients/gemini_client.py
+Gemini client using OpenAI SDK for better structured outputs
+"""
+from openai import AsyncOpenAI
 from PIL import Image
 import io
 import base64
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Type
 import logging
-from google.generativeai.types import GenerationConfig
-import asyncio
-from typing import Type, Optional, Dict, Any, List
-from pydantic import BaseModel, ValidationError
 import json
+
+from pydantic import BaseModel, ValidationError
 
 from .base_client import BaseLLMClient
 
@@ -16,99 +18,53 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiClient(BaseLLMClient):
+    """
+    Gemini client using OpenAI SDK for structured outputs.
+    Uses Google's OpenAI-compatible API endpoint.
+    """
+    
     def __init__(
         self, 
         api_key: str, 
         model_name: str = "gemini-2.0-flash-exp",
         temperature: float = 0.7
     ):
-        # Call the parent class's initializer
-        # Remove unsupported/extra JSON Schema keywords that Gemini rejects (e.g., "title", "description", "$id", "$schema").
-        # Keep a conservative allowlist of commonly-used keywords Gemini accepts.
-        ALLOWED_KEYS = {
-            "type",
-            "properties",
-            "items",
-            "additionalProperties",
-            "enum",
-            "required",
-            "anyOf",
-            "oneOf",
-            "allOf",
-            "minimum",
-            "maximum",
-            "minItems",
-            "maxItems",
-            "pattern",
-            "format",
-            "const",
-            "$ref",
-        }
-
-        def _sanitize_schema(obj: Any) -> None:
-            if isinstance(obj, dict):
-                # Remove keys not in allowlist
-                for k in list(obj.keys()):
-                    if k not in ALLOWED_KEYS:
-                        obj.pop(k, None)
-
-                # Recurse
-                for v in obj.values():
-                    _sanitize_schema(v)
-
-            elif isinstance(obj, list):
-                for item in obj:
-                    _sanitize_schema(item)
-
-        # Sanitize schema before further patching
-        try:
-            _sanitize_schema(response_schema)
-        except Exception:
-            # If sanitization fails, continue with best-effort schema
-            pass
-
-        def _patch_empty_objects(obj: Any) -> None:
+        super().__init__()  # Initialize parent with cache
         
-        genai.configure(api_key=api_key)
+        # Initialize OpenAI client with Google AI endpoint
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        
         self.model_name = model_name
         self.temperature = temperature
         
-        # Initialize model with generation config
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={
-                "temperature": temperature,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 8192,
-            }
-        )
-        
-        logger.info(f"GeminiClient initialized with model: {model_name}")
+        logger.info(f"✓ GeminiClient initialized with OpenAI SDK")
+        logger.info(f"  - Model: {model_name}")
+        logger.info(f"  - Temperature: {temperature}")
+
+    def _encode_image(self, image: Image.Image) -> str:
+        """Convert PIL Image to base64 data URL"""
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_bytes = buffered.getvalue()
+        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        return f"data:image/png;base64,{img_base64}"
 
     async def _call_llm(self, messages: List[Dict[str, Any]]) -> Optional[str]:
         """
-        Call Gemini API with OpenAI-style messages
-        Converts format and handles multimodal content
+        Call Gemini via OpenAI SDK
+        Handles both text and multimodal content
         """
         try:
-            # Convert OpenAI format to Gemini format
-            gemini_contents = []
-            user_message_content = messages[-1]['content']
-
-            for part in user_message_content:
-                if part['type'] == 'text':
-                    gemini_contents.append(part['text'])
-                elif part['type'] == 'image_url':
-                    # Decode base64 and create PIL Image
-                    base64_str = part['image_url']['url'].split(',')[1]
-                    image_data = base64.b64decode(base64_str)
-                    image = Image.open(io.BytesIO(image_data))
-                    gemini_contents.append(image)
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature
+            )
             
-            # Generate content asynchronously
-            response = await self.model.generate_content_async(gemini_contents)
-            return response.text
+            return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
@@ -120,157 +76,152 @@ class GeminiClient(BaseLLMClient):
         context: str
     ) -> str:
         """
-        Synthesize a comprehensive answer from retrieved contexts
-        Optimized for RAG synthesis with clear, accurate responses
+        Synthesize answer from context using chat completion
         """
         try:
-            # If context is provided separately, combine with question
+            # Build messages
             if context:
-                full_prompt = f"""Context:\n{context}\n\nQuestion: {question}"""
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful research assistant. Provide clear, accurate answers based on the given context."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+                    }
+                ]
             else:
-                full_prompt = question
+                messages = [
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
             
-            # Generate answer
-            response = await self.model.generate_content_async(full_prompt)
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature
+            )
             
-            if response and response.text:
-                return response.text.strip()
+            if response and response.choices:
+                return response.choices[0].message.content.strip()
             else:
-                logger.warning("Empty response from Gemini synthesis")
-                return "I apologize, but I couldn't generate a complete answer. Please try rephrasing your question."
+                logger.warning("Empty response from Gemini")
+                return "I apologize, but I couldn't generate a complete answer."
                 
         except Exception as e:
             logger.error(f"Synthesis failed: {e}", exc_info=True)
-            return f"An error occurred while synthesizing the answer: {str(e)}"
+            return f"An error occurred: {str(e)}"
 
-    async def enrich_content(
-        self,
-        content: str,
-        content_type: str = "text",
-        image: Optional[Image.Image] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Enrich content with summary and keywords
-        Can be used for both text and multimodal content
-        
-        Args:
-            content: Text content to enrich
-            content_type: Type of content (text, table, figure)
-            image: Optional image for multimodal enrichment
-        
-        Returns:
-            Dict with 'summary' and 'keywords'
-        """
-        try:
-            # Build enrichment prompt
-            if content_type == "table":
-                prompt = f"""Analyze this table and provide:
-1. A concise summary of the key findings
-2. A list of important keywords/concepts
-
-Table:
-{content}
-
-Provide your response in JSON format:
-{{"summary": "...", "keywords": ["...", "..."]}}"""
-            
-            elif content_type == "figure":
-                prompt = f"""Analyze this figure and provide:
-1. A detailed description of what the figure shows
-2. Key insights or findings
-3. Important keywords/concepts
-
-Caption: {content}
-
-Provide your response in JSON format:
-{{"summary": "...", "keywords": ["...", "..."]}}"""
-            
-            else:  # text
-                prompt = f"""Analyze this text and provide:
-1. A concise summary
-2. Key keywords/concepts
-
-Text:
-{content}
-
-Provide your response in JSON format:
-{{"summary": "...", "keywords": ["...", "..."]}}"""
-            
-            # Build content for API call
-            api_content = [prompt]
-            if image:
-                api_content.insert(0, image)
-            
-            response = await self.model.generate_content_async(api_content)
-            
-            if response and response.text:
-                # Try to parse JSON from response
-                import json
-                # Remove markdown code blocks if present
-                text = response.text.strip()
-                if text.startswith("```"):
-                    text = text.split("```")[1]
-                    if text.startswith("json"):
-                        text = text[4:]
-                    text = text.strip()
-                
-                result = json.loads(text)
-                return result
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Content enrichment failed: {e}")
-            return None
-        
     async def create_structured_completion(
         self,
         prompt: str,
         response_model: Type[BaseModel],
         image: Optional[Image.Image] = None,
-        max_retries: int = 1,
+        max_retries: int = 2,
         use_cache: bool = True
     ) -> Optional[BaseModel]:
+        """
+        Create structured completion using OpenAI's response_format
+        This enforces strict JSON schema compliance
+        """
         # Check cache
         cache_key = None
         if use_cache:
             cache_key = hash((prompt, str(response_model), id(image)))
             if cache_key in self._cache:
+                logger.debug("✓ Cache hit for structured completion")
                 return self._cache[cache_key]
         
-        # Chỉ gửi prompt gốc, để Gemini tự infer từ response_model
-        full_prompt = f"""{prompt}
-
-    IMPORTANT: Return ONLY valid JSON matching the expected structure. No explanations, no markdown."""
-        
-        # Prepare content
-        content = [full_prompt]
+        # Build message content
         if image:
-            content.insert(0, image)
+            # Multimodal message
+            content = [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": self._encode_image(image)
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        else:
+            # Text-only
+            content = prompt
         
-        # Configure for JSON output - KEY: Use response_schema instead of mime_type
-        generation_config = GenerationConfig(
-            temperature=0.1,
-            response_mime_type="application/json",
-            response_schema=response_model  # Gemini sẽ enforce schema này
-        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a precise data extraction assistant. Always respond with valid JSON matching the required schema. Never include explanations outside the JSON structure."
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
+        
+        # Get JSON schema from Pydantic model
+        schema = response_model.model_json_schema()
         
         # Retry loop
         for attempt in range(max_retries):
             try:
-                model = genai.GenerativeModel(
-                    model_name=self.model_name,
-                    generation_config=generation_config
+                #  Use response_format for structured output
+                response = await self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=0.1,  # Low temperature for consistency
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": response_model.__name__,
+                            "schema": schema,
+                            "strict": True  # ✅ CRITICAL: Enforce strict schema
+                        }
+                    }
                 )
                 
-                response = await model.generate_content_async(content)
-                
-                if not response or not response.text:
+                if not response or not response.choices:
                     logger.warning(f"Empty response (attempt {attempt + 1})")
                     continue
                 
-                # Parse directly - Gemini đã enforce schema rồi
-                result = response_model.model_validate_json(response.text)
+                raw_json = response.choices[0].message.content
+                
+                if not raw_json:
+                    logger.warning(f"Empty content (attempt {attempt + 1})")
+                    continue
+                
+                # ✅ Log for debugging
+                logger.debug(f"Raw response: {raw_json[:200]}...")
+                
+                # Parse and validate with Pydantic
+                try:
+                    result = response_model.model_validate_json(raw_json)
+                except ValidationError as ve:
+                    logger.warning(f"Validation error (attempt {attempt + 1}): {ve}")
+                    
+                    # Try parsing as dict first
+                    try:
+                        data = json.loads(raw_json)
+                        result = response_model.model_validate(data)
+                    except Exception as e:
+                        logger.error(f"Failed to parse/validate: {e}")
+                        if attempt == max_retries - 1:
+                            raise
+                        continue
+                
+                #  Validate required fields
+                if not self._validate_required_fields(result, response_model):
+                    logger.warning(f"Missing required fields (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        continue
+                    # On last attempt, return partial result
+                    logger.warning("Returning partial result with missing fields")
                 
                 # Cache and return
                 if use_cache and cache_key:
@@ -279,16 +230,100 @@ Provide your response in JSON format:
                 logger.info(f"✓ Structured output validated: {response_model.__name__}")
                 return result
                 
-            except json.JSONDecodeError as e:
-                logger.warning(f"JSON parse error (attempt {attempt + 1}): {e}")
-                logger.debug(f"Raw response: {response.text[:200]}")
-                
-            except ValidationError as e:
-                logger.warning(f"Validation error (attempt {attempt + 1}): {e}")
-                logger.debug(f"Response: {response.text[:200]}")
-                
             except Exception as e:
-                logger.error(f"Unexpected error (attempt {attempt + 1}): {e}")
+                logger.error(f"Attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    logger.error(f" All {max_retries} attempts failed for {response_model.__name__}")
+                    return None
+                
+                # Add delay before retry
+                import asyncio
+                await asyncio.sleep(1 * (attempt + 1))
         
-        logger.error(f"Failed after {max_retries} attempts")
         return None
+    
+    def _validate_required_fields(
+        self, 
+        result: BaseModel, 
+        model_class: Type[BaseModel]
+    ) -> bool:
+        """
+        Validate that all required fields are present and meaningful
+        """
+        schema = model_class.model_json_schema()
+        required_fields = schema.get("required", [])
+        
+        for field in required_fields:
+            value = getattr(result, field, None)
+            
+            # Check if field exists
+            if value is None:
+                logger.warning(f"Required field '{field}' is None")
+                return False
+            
+            # For string fields, check not empty
+            if isinstance(value, str) and len(value.strip()) == 0:
+                logger.warning(f"Required string field '{field}' is empty")
+                return False
+            
+            # For list fields, allow empty for certain fields
+            if isinstance(value, list) and len(value) == 0:
+                # These fields can be empty
+                allowed_empty = [
+                    "keywords", 
+                    "numerical_data", 
+                    "labels_detected",
+                    "citations_mentioned",
+                    "datasets_mentioned",
+                    "contributions"
+                ]
+                if field not in allowed_empty:
+                    logger.warning(f"Required list field '{field}' is empty")
+                    return False
+        
+        return True
+
+    async def enrich_content(
+        self,
+        content: str,
+        content_type: str = "text",
+        image: Optional[Image.Image] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Legacy method for backward compatibility
+        Uses create_structured_completion internally
+        """
+        from ..schema import EnrichmentOutput
+        
+        # Build appropriate prompt
+        if content_type == "table":
+            prompt = f"""Analyze this table and extract:
+1. A concise summary of key findings
+2. Important keywords/concepts
+
+Table:
+{content[:1000]}"""
+        
+        elif content_type == "figure":
+            prompt = f"""Analyze this figure and extract:
+1. Detailed description of what it shows
+2. Key insights
+3. Important keywords
+
+Caption: {content}"""
+        
+        else:  # text
+            prompt = f"""Analyze this text and extract:
+1. Concise summary
+2. Key keywords/concepts
+
+Text:
+{content[:1000]}"""
+        
+        result = await self.create_structured_completion(
+            prompt=prompt,
+            response_model=EnrichmentOutput,
+            image=image
+        )
+        
+        return result.model_dump() if result else None

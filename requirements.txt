@@ -59,3 +59,4 @@ youtube-transcript-api
 # ===============================
 tqdm
 aiohttp
+openai
