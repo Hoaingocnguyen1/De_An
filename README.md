@@ -19,8 +19,19 @@ Requirements
 
 Quick setup: See detail in QUICKSTART.md
 
+Configuration: 
+![Configuration Overview](images/config.png)
+
+
 Notes about the current codebase
 - Figure embeddings: the pipeline now appends the figure's "analysis" text into the multimodal embedding input (caption + "Detailed Analysis" text). This makes the analysis retrievable by text queries as well as by multimodal queries.
 - Table extraction: the pipeline first uses the VLM to extract tables; when that fails or returns empty, a pdfplumber fallback is attempted.
 - Gemini schema patching: some Pydantic models produce JSON Schema objects that Gemini rejects (empty object properties). The client now patches such cases by adding additionalProperties or converting maps to typed maps (e.g., metrics_mentioned -> map<string, number>).
+- VLMs aren’t very good at extracting complex tables. For harder cases, should combine them with OCR to improve text and layout accuracy.
+- Thầy thông cảm vì nhiều thành viên lạ tên trên github ạ, do em dùng máy khác nên v.
 
+
+Future Improvements
+- Enhance layout and parser extraction
+- Define stricter schemas and validation
+- Refactor and clean up codebase

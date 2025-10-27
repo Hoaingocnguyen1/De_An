@@ -23,7 +23,51 @@ class GeminiClient(BaseLLMClient):
         temperature: float = 0.7
     ):
         # Call the parent class's initializer
-        super().__init__()
+        # Remove unsupported/extra JSON Schema keywords that Gemini rejects (e.g., "title", "description", "$id", "$schema").
+        # Keep a conservative allowlist of commonly-used keywords Gemini accepts.
+        ALLOWED_KEYS = {
+            "type",
+            "properties",
+            "items",
+            "additionalProperties",
+            "enum",
+            "required",
+            "anyOf",
+            "oneOf",
+            "allOf",
+            "minimum",
+            "maximum",
+            "minItems",
+            "maxItems",
+            "pattern",
+            "format",
+            "const",
+            "$ref",
+        }
+
+        def _sanitize_schema(obj: Any) -> None:
+            if isinstance(obj, dict):
+                # Remove keys not in allowlist
+                for k in list(obj.keys()):
+                    if k not in ALLOWED_KEYS:
+                        obj.pop(k, None)
+
+                # Recurse
+                for v in obj.values():
+                    _sanitize_schema(v)
+
+            elif isinstance(obj, list):
+                for item in obj:
+                    _sanitize_schema(item)
+
+        # Sanitize schema before further patching
+        try:
+            _sanitize_schema(response_schema)
+        except Exception:
+            # If sanitization fails, continue with best-effort schema
+            pass
+
+        def _patch_empty_objects(obj: Any) -> None:
         
         genai.configure(api_key=api_key)
         self.model_name = model_name
@@ -184,7 +228,7 @@ Provide your response in JSON format:
         prompt: str,
         response_model: Type[BaseModel],
         image: Optional[Image.Image] = None,
-        max_retries: int = 3,
+        max_retries: int = 1,
         use_cache: bool = True
     ) -> Optional[BaseModel]:
         # Check cache
